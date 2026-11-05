@@ -19,10 +19,10 @@ swift run Run
 swift test
 
 # Run a single test suite
-swift test --filter CreateItemUseCaseTests
+swift test --filter FeatureUseCaseTests
 
 # Run a single test by name
-swift test --filter "createItem happy path"
+swift test --filter "create happy path"
 
 # Docker build
 docker build -t show-menu-backend .
@@ -76,7 +76,7 @@ Each business module in `Modules/` follows this layering:
 - **Domain events** ride the `DomainEventRecorder` → `DomainEventCollector` pipeline (collected during UnitOfWork execution, **dispatched after commit**). Two kinds with different owners — *lifecycle* (Repository) vs *semantic* (AggregateRoot); see **Domain Events: Lifecycle vs Semantic** below.
 - **Mapper** protocol has three conversion directions: `toEntity(model:)`, `toModel(entity:)`, `toDTO(entity:)`.
 - **DataSource** vs **Repository**: DataSource is a raw CRUD interface (insert, update, delete, fetch) over Firestore models, executed through a `FirestoreTransaction` (a transport-erased wrapper over an active transaction, or `.direct(firestore:)` for non-transactional reads). Repository is the domain-level abstraction that works with entities, holds a `context: any UnitOfWorkContext`, resolves its DataSource via `dataSourceFactory("", context.transaction)`, and records **lifecycle** events (`created`/`updated`/`deleted`) on each `insert`/`update`/`delete`. QueryHandlers pass `.direct(firestore:)`; writes run inside `FirestoreTransactionUnitOfWork`, which threads the live `FirestoreTransaction` through `context.transaction`.
-- **QueryableDataSource** adds filtered/ordered query support with `DataSourceQuery`, `DataSourceFilter`, `DataSourceOrder`, and `offset` (Firestore bills skipped docs as reads). `countAll()` returns the **unfiltered** collection total as a separate, non-atomic read (the only public count in the pinned client). `GET /v1/items?limit=&offset=` returns `ItemPageDTO { items, total, limit, offset }`. Search is not supported on Firestore: there is no substring match, and a prefix range would force `orderBy(name)` and be case-sensitive.
+- **QueryableDataSource** adds filtered/ordered query support with `DataSourceQuery`, `DataSourceFilter`, `DataSourceOrder`, and `offset` (Firestore bills skipped docs as reads). `countAll()` returns the **unfiltered** collection total as a separate, non-atomic read (the only public count in the pinned client). No endpoint pages through it yet (the Items demo that did was removed in S04); the first list endpoint, `GET /plans` (S05), will. Search is not supported on Firestore: there is no substring match, and a prefix range would force `orderBy(name)` and be case-sensitive.
 - **Optimistic concurrency** rides an opaque `Version` token carried by every `AggregateRoot`; writes are check-and-set and conflicts surface as `ConcurrencyError`. See **Optimistic Concurrency (Versioning)** below.
 - **Transactional Outbox** makes integration-event delivery reliable: a use case records the event into a durable outbox **inside the command's transaction** (`context.outbox.record(_:)`) instead of publishing post-commit; a relay drains the outbox and publishes through the existing `IntegrationEventChannel`. Closes the commit-then-publish dual-write gap. See **Transactional Outbox (Reliable Integration Events)** below.
 - **Inbox** (idempotent consumer, `Lib/DDD/Inbox/`) is the consumer side of the outbox: an `InboxedCommandHandler` de-duplicates redelivered integration events per consumer, keyed on `IntegrationEvent.id`, with the marker committed in the command's own transaction. See **Inbox (idempotent consumer)** below.
@@ -127,7 +127,7 @@ Every write is an **optimistic check-and-set** keyed on an abstract per-aggregat
 - **Conflict propagation:** `FirestoreTransactionUnitOfWork` surfaces `ConcurrencyError` **unchanged** through the CommandHandler — never collapses it into a generic Firestore error. Map it at the edge to `409 Conflict` (internal stale write) or `412 Precondition Failed` (stale `If-Match`).
 - **No data migration:** an absent `version` field decodes to `nil` (`.none`) and matches a `.none` expected token, so existing documents adopt versioning on their first write.
 
-**ETag at the edge (optional, separable):** `Integration/Vapor/ETag+Vapor.swift` provides reusable glue — `Version.etag`, `Request.ifMatch`, `Response.setETag`. Responses advertise the current version as an `ETag`; mutating endpoints read `If-Match`, reject a stale edit early with `412` (a fast pre-check before the transaction), and thread the precondition into the command where the in-transaction CAS is authoritative. Wired into `PUT /v1/items/:id` (`UpdateItem*`); creates don't need `If-Match`.
+**ETag at the edge (optional, separable):** `Integration/Vapor/ETag+Vapor.swift` provides reusable glue — `Version.etag`, `Request.ifMatch`, `Response.setETag`. Responses advertise the current version as an `ETag`; mutating endpoints read `If-Match`, reject a stale edit early with `412` (a fast pre-check before the transaction), and thread the precondition into the command where the in-transaction CAS is authoritative. **Currently unwired**: the Items demo that used it was removed in S04, and no Catalog endpoint sends `ETag`/`If-Match`. It is planned as an option on `PUT /plans/:id` (S06). Creates don't need `If-Match`.
 
 ### Authorization (Ability / Voter)
 
@@ -161,7 +161,7 @@ A second cross-cutting concern under `Lib/AOP/` — `Lib/AOP/Idempotency/`. It d
 
 **Atomicity (critical):** the de-duplication record and the command's writes commit in the **same** `UnitOfWork` transaction — a crash can't leave "marked-but-not-done" or "done-but-not-marked". This is achieved by the `CommandHandler` `perform(_:in:)` / `handle` split (mirrors `Repository.doInsert`/`insert`): `IdempotentCommandHandler`'s default `handle` opens one `unitOfWork.execute` and composes reserve/work/store around the conforming type's `perform` inside it — never a wrapper that opens its own connection.
 
-**Defaults (configurable via `IdempotencyConfiguration`):** key scope `actorAndCommandType` (principal id + command type + key, hashed to the doc id); in-flight strategy `rejectConflict` (409, client retries — in practice the transaction runner's retry usually upgrades a concurrent duplicate to a clean replay); TTL 24h. Wired for `POST/PUT /v1/items`; the IAM user-lifecycle handlers do **not** conform to it — they conform to `InboxedCommandHandler` instead (see **Inbox (idempotent consumer)**), de-duplicating by integration event id.
+**Defaults (configurable via `IdempotencyConfiguration`):** key scope `actorAndCommandType` (principal id + command type + key, hashed to the doc id); in-flight strategy `rejectConflict` (409, client retries — in practice the transaction runner's retry usually upgrades a concurrent duplicate to a clean replay); TTL 24h. **Currently unwired** (the Items demo that used it was removed in S04); the first consumer is the purchase endpoint, `POST /accounts/:accountId/purchases` (S11). The IAM user-lifecycle handlers do **not** conform to it — they conform to `InboxedCommandHandler` instead (see **Inbox (idempotent consumer)**), de-duplicating by integration event id.
 
 ### Resilience (Retry / Circuit Breaker / Rate Limiter)
 
@@ -241,6 +241,6 @@ Test pattern: `makeSUT()` creates the system under test with in-memory collabora
 
 ## Adding a New Module
 
-1. Create `Modules/YourModule/` mirroring the Items module structure (Domain → Application → Infrastructure → Presentation)
+1. Create `Modules/YourModule/` mirroring the Catalog module structure (Domain → Application → Infrastructure → Presentation)
 2. Declare the module's properties on the `Application.Dependencies` protocol in `Vapor+Dependencies.swift`, then implement them in a `Modules/YourModule/CompositionRoot+YourModule.swift` extension on `CompositionRoot` (mapper, data source factory, repository factory, use case factory, query/command handlers). Never put a module's resolutions in `Vapor+Dependencies.swift` — see `docs/conventions/CompositionRoot.md`
 3. Register routes in `routes.swift`

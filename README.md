@@ -77,7 +77,8 @@ Sources/ShowMenuBackend/
 ├── Lib/                      # Generic DDD + CQRS infrastructure
 ├── Integration/              # Firestore, CloudRun, Eventarc
 └── Modules/                  # Business modules
-    └── Items/                # Sample module (replace with your domain)
+    ├── Catalog/              # Features (and, from S05, Plans); reference module for new ones
+    └── IAM/                  # Firebase Auth user lifecycle
 ```
 
 Each module in `Modules/` follows the DDD layering: **Domain** (Entity, Event, Error, Repository protocol) → **Application** (Command/Query, UseCase, DTO, Mapper) → **Infrastructure** (Firestore Model, DataSource, Repository impl) → **Presentation** (Controller, Route).
@@ -91,7 +92,7 @@ For detailed architecture documentation — request flow, dependency injection, 
 swift test
 
 # Run a single test suite
-swift test --filter CreateItemUseCaseTests
+swift test --filter FeatureUseCaseTests
 
 # Run with emulators for integration tests
 FIRESTORE_EMULATOR_HOST=localhost:9002 GCP_PROJECT_ID=demo-project swift test
@@ -247,18 +248,19 @@ For details on how the Cloud Build pipeline works and production tuning, see [DE
 | GET | `/version` | App version |
 | POST | `/` | Eventarc webhook (CloudEvents) |
 
-### Sample Items Module
+### Catalog (admin only)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/v1/items` | List all items |
-| GET | `/v1/items/:itemId` | Get item by ID |
-| POST | `/v1/items` | Create a new item |
+| POST | `/api/v1/plans/features` | Create a feature (200 `FeatureResponse`) |
+| PUT | `/api/v1/plans/features/:featureId` | Partially update a feature (absent fields keep their value) |
 
-**Create item payload:**
+**Create feature payload:**
 ```json
 {
-  "name": "My Item",
-  "description": "Optional description"
+  "category": "ai",
+  "name": { "en": "AI Menu Generator", "uk": "Генератор меню ШІ" },
+  "description": { "en": "Optional description" }
 }
 ```
+`category` is `ai` or `technicalSupport`; invalid or missing fields answer `422`.

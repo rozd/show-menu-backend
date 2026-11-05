@@ -15,7 +15,7 @@ This skill creates the smallest atomic DDD unit — the Domain layer for an Enti
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/` to find directory names.
-3. If `$ARGUMENTS` is provided, try to parse a module name and/or entity name from it (e.g., `Orders/OrderLine`, `Items`, `Order`).
+3. If `$ARGUMENTS` is provided, try to parse a module name and/or entity name from it (e.g., `Orders/OrderLine`, `Catalog`, `Order`).
 
 ## Step 1 — Ask Questions
 
@@ -23,7 +23,7 @@ Use `AskUserQuestion` to gather information. Combine into as few calls as possib
 
 ### Question 1: Target Module
 Ask: "Which module should this Entity belong to?" with options dynamically built from discovered modules, plus an option to create a new module directory:
-- **Items** — `Modules/Items/`
+- **Catalog** — `Modules/Catalog/`
 - **Orders** — `Modules/Orders/`
 - (etc., one per discovered module)
 - **New module** — Create a new module directory
@@ -39,7 +39,7 @@ Skip this question if the entity name was unambiguously identified from `$ARGUME
 
 ### Question 3: Properties
 Ask: "What properties should {Entity} have?" with options:
-- **Use defaults** — `name: String` and `description: String?` (same as Items module)
+- **Use defaults** — `name: String` and `description: String?` (the simple case; `Catalog/Feature` shows `LocalizedString` fields and a partial update)
 - **Specify properties** — The user will list them as `propertyName: Type` pairs
 
 If the user specifies properties, parse them as `propertyName: Type` pairs. Optional properties should have `?` suffix on the type (e.g., `description: String?`).
@@ -82,7 +82,7 @@ From the module name and entity name, derive all type names:
 **All source files** go under `Sources/{APP_NAME}/Modules/{Module}/`.
 **All test files** go under `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
 
-Read the corresponding Items module file as reference before writing each file. Follow the exact same patterns, protocols, and conventions.
+Read the corresponding Catalog module file as reference before writing each file. Follow the exact same patterns, protocols, and conventions.
 
 ### File 1: `Domain/Entity/{Entity}.swift`
 
@@ -157,7 +157,7 @@ extension {Entity} {
 }
 ```
 
-- Reference: `Modules/Items/Domain/Entity/Item.swift`
+- Reference: `Modules/Catalog/Domain/Entity/Feature.swift`
 - Only required `String` properties get validation guards
 - The `update()` method accepts all user properties (not `id`, `createdAt`, `updatedAt`)
 - Non-String or optional properties are excluded from `validate()` unless the user specifies custom validation
@@ -197,7 +197,7 @@ struct {Entity}Event: DomainEvent {
 }
 ```
 
-- Reference: `Modules/Items/Domain/Event/ItemEvent.swift`
+- Reference: `Modules/Catalog/Domain/Event/FeatureEvent.swift`
 - Custom event raw values should be lowercase action words (e.g., `"archived"`, `"published"`)
 - Custom event cases follow `{entity}{CustomAction}` naming (e.g., `.orderLineArchived`)
 
@@ -211,7 +211,7 @@ struct {Entity}NotFoundError: Error {
 }
 ```
 
-- Reference: `Modules/Items/Domain/Error/ItemError.swift`
+- Reference: `Modules/Catalog/Domain/Error/FeatureError.swift`
 
 ### File 4: `Domain/Repository/{Entity}Repository.swift`
 
@@ -222,7 +222,7 @@ protocol {Entity}Repository: Repository where Entity == {Entity}, Model == {Enti
 }
 ```
 
-- Reference: `Modules/Items/Domain/Repository/ItemRepository.swift`
+- Reference: `Modules/Catalog/Domain/Repository/FeatureRepository.swift`
 - **Note**: `{Entity}Model` and `{Entity}DTO` types do not exist yet. This creates a known compiler error until the Infrastructure and Application layers are added. Mention this in the summary.
 
 ### File 5: `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/{Entity}Tests.swift`
@@ -373,7 +373,7 @@ After creating all files, output:
 3. **Next steps** — Suggest what to do next:
    - Use `/create-usecase` to add a UseCase (e.g., Create{Entity}) which will require building out the Application and Infrastructure layers
    - Use `/create-module` if you want a complete module with all layers at once
-   - Manually add Model, DTO, Mapper, DataSource, and Controller files following the Items module pattern
+   - Manually add Model, DTO, Mapper, DataSource, and Controller files following the Catalog module pattern
 
 ## Important Rules
 

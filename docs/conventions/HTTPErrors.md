@@ -31,7 +31,7 @@ Specific cases first, `AbortError` after, so typed errors keep their stable `cod
 ## Validation convention
 
 - **Edge (shape):** Vapor `Validatable` on request DTOs (`try Payload.validate(content: req)`) for presence/format/length. Failures become 422 with per-field `details`.
-- **Domain (invariants):** entities and value objects throw `ValidationError` (`LocalizedString`, `Currency`, `Price`, `Item.validate`). Never rely on edge validation for an invariant.
+- **Domain (invariants):** entities and value objects throw `ValidationError` (`LocalizedString`, `Currency`, `Price`, `Feature.validate`). Never rely on edge validation for an invariant.
 - DTO-level semantic rules that differ from the domain (e.g. `PriceDTO.amount > 0` while `Price` allows 0) live in the DTO's `validate()` and throw a `ValidationError`.
 
 ## DomainError statuses (convention)

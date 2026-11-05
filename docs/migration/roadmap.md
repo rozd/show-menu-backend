@@ -364,7 +364,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - [x] S01 Local loop / `/api` / Echo / CI
 - [x] S02 Error contract and shared kernel
 - [x] S03 Authentication and admin guard
-- [ ] S04 Catalog: Features (+ remove Items)
+- [x] S04 Catalog: Features (+ remove Items)
 - [ ] S05 Plans: create, get, list
 - [ ] S06 Plans: mutations
 - [ ] S07 Users onboarding, admin claim, webhook auth
@@ -418,6 +418,18 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **S03 (bug found):** the emulator path decoded the payload with a default `JSONDecoder`, which reads epoch seconds relative to 2001 (+31 years); fixed with `.secondsSince1970`. Any future hand-rolled JWT decoding must do the same.
 - **S03:** The verifier is built lazily by `app.firebaseTokenVerifier` (`FirebaseTokenVerifier+Vapor.swift`) from `app.gcp`; unsigned tokens accepted only when `gcp.config.environment.isEmulator`. JWKS is cached by `Cache-Control: max-age` (default 1h). The signed RS256 path is unit-tested with in-test RSA keys served by a fake JWKS fetcher; it has not been run against Google's live JWKS.
 - **S03:** Harness `auth-rbac`: all 4 cases pass (401 no header, 401 invalid token, 403 regular user, admin not 401/403). `smoke` 2/2 pass.
+
+### Decisions taken (S04)
+- **S04:** Catalog scaffolded by hand following the `create-module`/`create-entity` skills (they ask interactive questions); delivers only what S04 needs — `Feature` create + update, no Get/List query handlers (S05 brings the first list). Skills and `AGENTS.md` now point at Catalog; the Items module, its tests, routes and `Application.Dependencies` entries are deleted.
+- **S04:** `features/{id}` doc = Node's `{id, category, name, description, createdAt, updatedAt}` with Timestamps, **plus** the template's additive `version` Int (D6, lazily adopted: absent decodes to `.none`, first Vapor write sets it). `description` is written as an explicit `null` (Node's `toPersistence` passes `null`) via FirestoreAPI's `@ExplicitNull`; the response omits it when null. `id` is a plain field in the model, **not** `@DocumentID`: the FirestoreEncoder skips `@DocumentID`, and Node stores `id` inside the document. `ExplicitNull` is made `@retroactive @unchecked Sendable` in `FeatureModel.swift`. Decoding requires the `description` key to be present (it always is, Node writes `null`).
+- **S04:** Response dates are JS `toISOString()` strings (`2026-01-02T03:04:05.678Z`, UTC, ms). `POST /plans/features` answers **200**.
+- **S04:** Validation (Node had none): category must be `ai|technicalSupport`; `name` required; every `name`/`description` text non-blank; empty `name`/`description` map rejected (`LocalizedString.Error.empty`). All → 422 `validation_failed`. Request payload fields are all optional `String`/`[String:String]` so that missing/invalid values are domain errors (422), not 400 decode errors. Unknown `featureId` → 404.
+- **S04:** `PUT` is partial like Node (`props.x || this.x`): `null`/absent keeps the current value, so a stored `description` can be replaced but never cleared. An empty body still bumps `updatedAt` and records the event (Node parity).
+- **S04:** Semantic events `FeatureAdded`/`FeatureUpdated` are extra kinds on `FeatureEventKind` (`featureAdded` = `"feature.added"`, `featureModified` = `"feature.updated"`); the Repository still adds lifecycle `created`/`updated`.
+- **S04:** `Timestamp(exact:)` now rounds to whole microseconds (Firestore's precision). A ms-aligned Node timestamp (`…123 ms`) went `Date` → `122_999_907 ns` on write-back, which Node's `toDate()` floors to `…122 ms`; every Feature update rewrites `createdAt`, so this was a real 1 ms drift.
+- **S04:** Idempotency and ETag/If-Match are now **unwired** (the only users were the Items endpoints). AGENTS.md says so; S11 (`IdempotentCommandHandler`) and S06 (optional ETag) re-wire them.
+- **S04:** Feature routes are on the `admin` group next to `PlansGuardRouteV1`; the explicit `POST/PUT /plans/features[/:id]` win over the guard's `/plans/**` catch-all. The guard is untouched.
+- **S04:** Harness `plans-lifecycle`: "create a Feature" ✓; "create Plan", "activate Plan", "fetch Plan" ✕ (S05/S06 scope, plans don't exist yet). `auth-rbac` 4/4 ✓, `smoke` 2/2 ✓.
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.
