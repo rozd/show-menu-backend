@@ -32,7 +32,6 @@ func routes(_ app: Application) throws {
     // /plans/* is admin-only. Node's guard also answered 401/403 for *unmatched*
     // paths under /plans; Vapor skips group middleware when no route matches, so
     // a guarded catch-all reproduces that (admins get the normal 404).
-    // TODO(S05): replace the `GET /plans` stub with ListPlans; keep the catch-all.
     try admin.register(collection: PlansGuardRouteV1())
 
     // Catalog: `POST/PUT /plans/features` are admin-only. Registered after the
@@ -42,6 +41,14 @@ func routes(_ app: Application) throws {
         updateFeatureCommandHandler: app.deps.updateFeatureCommandHandler
     )
     try admin.register(collection: FeatureRouteV1(controller: featureController))
+
+    // Catalog: `POST /plans`, `GET /plans`, `GET /plans/:planId` (admin-only).
+    let planController = PlanController(
+        createPlanCommandHandler: app.deps.createPlanCommandHandler,
+        getPlanQueryHandler: app.deps.getPlanQueryHandler,
+        listPlansQueryHandler: app.deps.listPlansQueryHandler
+    )
+    try admin.register(collection: PlanRouteV1(controller: planController))
 
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)

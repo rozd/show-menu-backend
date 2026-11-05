@@ -71,6 +71,13 @@ extension Application {
         var updateFeatureUseCaseFactory: UseCaseFactory<UpdateFeatureUseCase> { get }
         var createFeatureCommandHandler: CreateFeatureCommandHandler { get }
         var updateFeatureCommandHandler: UpdateFeatureCommandHandler { get }
+        var planMapper: PlanMapper { get }
+        var planDataSourceFactory: DataSourceFactory<PlanModel> { get }
+        var planRepositoryFactory: RepositoryFactory<any PlanRepository> { get }
+        var createPlanUseCaseFactory: UseCaseFactory<CreatePlanUseCase> { get }
+        var createPlanCommandHandler: CreatePlanCommandHandler { get }
+        var getPlanQueryHandler: GetPlanQueryHandler { get }
+        var listPlansQueryHandler: ListPlansQueryHandler { get }
 
         // USER_LIFECYCLE_BEGIN
         // MARK: IAM

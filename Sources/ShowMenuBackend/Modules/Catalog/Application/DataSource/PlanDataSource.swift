@@ -1,0 +1,2 @@
+protocol PlanDataSource: QueryableDataSource<PlanModel> {
+}
