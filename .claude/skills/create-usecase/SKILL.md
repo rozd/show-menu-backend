@@ -13,7 +13,7 @@ You are adding a new UseCase to an existing module. The optional hint is: **$ARG
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/` to find directory names.
-3. If `$ARGUMENTS` is provided, try to parse a module name or use-case name from it (e.g., `Items/ArchiveItem`, `ArchiveItem`, `Items`).
+3. If `$ARGUMENTS` is provided, try to parse a module name or use-case name from it (e.g., `Catalog/ArchiveFeature`, `ArchiveFeature`, `Catalog`).
 
 ## Step 1 — Ask Questions
 
@@ -21,7 +21,7 @@ Use `AskUserQuestion` to gather the following (combine into one call where possi
 
 ### Question 1: Target Module
 Ask: "Which module should this UseCase be added to?" with options dynamically built from the modules found in pre-flight. Example:
-- **Items** — `Modules/Items/`
+- **Catalog** — `Modules/Catalog/`
 - **Orders** — `Modules/Orders/`
 - (etc., one per discovered module)
 
@@ -70,25 +70,25 @@ This gives you all the concrete type names to use in generated code.
 
 ## Step 3 — Derive Names
 
-| Concept | Pattern | Example (Action=Archive, Entity=Item) |
+| Concept | Pattern | Example (Action=Archive, Entity=Feature) |
 |---|---|---|
-| UseCase | `{Action}{Entity}UseCase` | `ArchiveItemUseCase` |
-| UseCase Params | `{Action}{Entity}UseCase.Params` | `ArchiveItemUseCase.Params` |
-| Command | `{Action}{Entity}Command` | `ArchiveItemCommand` |
-| Command Payload | `{Action}{Entity}Command.Payload` | `ArchiveItemCommand.Payload` |
-| Command Handler | `{Action}{Entity}CommandHandler` | `ArchiveItemCommandHandler` |
-| Domain Event Handler | `{Action}On{Entity}{EventKind}Handler` | `ArchiveOnItemCreatedHandler` |
+| UseCase | `{Action}{Entity}UseCase` | `ArchiveFeatureUseCase` |
+| UseCase Params | `{Action}{Entity}UseCase.Params` | `ArchiveFeatureUseCase.Params` |
+| Command | `{Action}{Entity}Command` | `ArchiveFeatureCommand` |
+| Command Payload | `{Action}{Entity}Command.Payload` | `ArchiveFeatureCommand.Payload` |
+| Command Handler | `{Action}{Entity}CommandHandler` | `ArchiveFeatureCommandHandler` |
+| Domain Event Handler | `{Action}On{Entity}{EventKind}Handler` | `ArchiveOnFeatureCreatedHandler` |
 | Integration Event Handler | `{Action}On{IntegrationEvent}Handler` | `ArchiveOnUserDeletedHandler` |
-| Controller method | `{action}{Entity}(req:)` | `archiveItem(req:)` |
-| Test suite | `{Action}{Entity}UseCaseTests` | `ArchiveItemUseCaseTests` |
-| Domain event kind | `.{entity}{Action}d` or `.{entity}{Action}ed` | `.itemArchived` |
+| Controller method | `{action}{Entity}(req:)` | `archiveFeature(req:)` |
+| Test suite | `{Action}{Entity}UseCaseTests` | `ArchiveFeatureUseCaseTests` |
+| Domain event kind | `.{entity}{Action}d` or `.{entity}{Action}ed` | `.featureArchived` |
 
 ## Step 4 — Create Files by Trigger Type
 
 **All source files** go under `Sources/{APP_NAME}/Modules/{Module}/`.
 **All test files** go under `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
 
-Read the corresponding reference files from the Items module before writing. Follow exact same conventions.
+Read the corresponding reference files from the Catalog module before writing. Follow exact same conventions.
 
 ---
 
@@ -124,7 +124,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
 
    - If the UseCase **writes data**: it receives `context: any UnitOfWorkContext` and `repositoryFactory`
    - If the UseCase is **read-only**: it receives `dataSourceFactory: DataSourceFactory<{Entity}Model>` and `mapper` (no context/repository)
-   - Reference: `Modules/Items/Application/UseCase/CreateItemUseCase.swift`
+   - Reference: `Modules/Catalog/Application/UseCase/CreateFeatureUseCase.swift`
 
 2. **`Application/Command/{Action}{Entity}Command.swift`**
 
@@ -139,7 +139,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
    }
    ```
 
-   - Reference: `Modules/Items/Application/Command/CreateItemCommand.swift`
+   - Reference: `Modules/Catalog/Application/Command/CreateFeatureCommand.swift`
 
 3. **`Application/Command/Handler/{Action}{Entity}CommandHandler.swift`**
 
@@ -161,7 +161,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
    }
    ```
 
-   - Reference: `Modules/Items/Application/Command/Handler/CreateItemCommandHandler.swift`
+   - Reference: `Modules/Catalog/Application/Command/Handler/CreateFeatureCommandHandler.swift`
 
 4. **Update `Presentation/Controller/{Entity}Controller.swift`** — Add a new property for the command handler and a new endpoint method:
 
@@ -178,7 +178,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
 
    - For Update/Delete: extract `{entity}Id` from `req.parameters.get("{entity}Id")`
    - Error handling: domain errors → 400, not found → 404, FirestoreError → 503/500
-   - Reference: `ItemController.createItem(req:)`
+   - Reference: `FeatureController.createFeature(req:)`
 
 5. **Update `Presentation/Route/{Entity}RouteV1.swift`** — Add the new route:
 
@@ -239,7 +239,7 @@ Creates a DomainEventHandler that reacts to an event from this bounded context, 
    - Reference protocol: `Lib/DDD/Events/DomainEventHandler.swift`
    - If the event kind doesn't exist yet, add it to `{Entity}EventKind` enum in `Domain/Event/{Entity}Event.swift`
 
-3. **Optionally add a new event kind** — If the UseCase records a new event kind (e.g., `.itemArchived`), update `Domain/Event/{Entity}Event.swift` to add the new case to `{Entity}EventKind`.
+3. **Optionally add a new event kind** — If the UseCase records a new event kind (e.g., `.featureArchived`), update `Domain/Event/{Entity}Event.swift` to add the new case to `{Entity}EventKind`.
 
 ---
 
@@ -310,7 +310,7 @@ Creates only the UseCase (no external trigger). Called by other UseCases or serv
 
 Create `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/{Action}{Entity}UseCaseTests.swift`.
 
-Follow the test patterns from `CreateItemUseCaseTests.swift`:
+Follow the test patterns from `FeatureUseCaseTests.swift`:
 
 - Use Swift Testing framework (`@Suite`, `@Test`, `#expect`, `#require`)
 - `@testable import {APP_NAME}`
@@ -344,7 +344,7 @@ Follow the test patterns from `CreateItemUseCaseTests.swift`:
 
 To seed test data, use `await ds.seed(models:)` on the `InMemoryDataSource`.
 
-Reference: `Tests/{APP_NAME}Tests/Unit/Modules/Items/CreateItemUseCaseTests.swift`
+Reference: `Tests/{APP_NAME}Tests/Unit/Modules/Catalog/FeatureUseCaseTests.swift`
 
 ## Step 6 — Summary
 

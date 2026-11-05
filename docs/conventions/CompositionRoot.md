@@ -104,7 +104,7 @@ Command handlers get `unitOfWork` instead.
    - Register its routes in `routes.swift`: build the controller from `app.deps.…` handlers
      and call `try app.register(collection:)`.
    - Add a `<Module>+Vapor.swift` only for the `Content` conformance of its DTOs (as
-     `Items+Vapor.swift` and `IAM+Vapor.swift` do).
+     `Catalog+Vapor.swift` and `IAM+Vapor.swift` do).
    - If it has integration event handlers, register them in `configure.swift`.
 
 There is no migration step.
