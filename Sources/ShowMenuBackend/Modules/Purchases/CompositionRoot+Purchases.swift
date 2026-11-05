@@ -87,6 +87,83 @@ extension Application.CompositionRoot {
         }
     }
 
+    var checkoutLockDataSourceFactory: DataSourceFactory<CheckoutLockModel> {
+        resolver.resolve(\.checkoutLockDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestoreCheckoutLockDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    // MARK: Purchases — Use Cases, Handlers, Flow
+
+    var purchaseSubscriptionUseCaseFactory: UseCaseFactory<PurchaseSubscriptionUseCase> {
+        resolver.resolve(\.purchaseSubscriptionUseCaseFactory) {
+            { [logger = app.logger, firestore] ctx in
+                PurchaseSubscriptionUseCase(
+                    context: ctx,
+                    accountDataSourceFactory: accountDataSourceFactory,
+                    accountMapper: accountMapper,
+                    permissionStoreFactory: accountPermissionStoreFactory,
+                    ability: AccountMemberAbility(),
+                    planRepositoryFactory: planRepositoryFactory,
+                    userRepositoryFactory: userRepositoryFactory,
+                    orderRepositoryFactory: orderRepositoryFactory,
+                    invoiceRepositoryFactory: invoiceRepositoryFactory,
+                    sessionDataSourceFactory: checkoutSessionDataSourceFactory,
+                    sessionMapper: checkoutSessionMapper,
+                    lockDataSourceFactory: checkoutLockDataSourceFactory,
+                    directTransaction: { FirestoreTransaction.direct(firestore: firestore) },
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var purchaseSubscriptionCommandHandler: PurchaseSubscriptionCommandHandler {
+        resolver.resolve(\.purchaseSubscriptionCommandHandler) {
+            PurchaseSubscriptionCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: purchaseSubscriptionUseCaseFactory,
+                idempotency: IdempotencyComponents(
+                    storeFactory: idempotencyStoreFactory,
+                    configuration: idempotencyConfiguration
+                ),
+                logger: app.logger
+            )
+        }
+    }
+
+    var checkoutInitiator: CheckoutInitiator {
+        resolver.resolve(\.checkoutInitiator) {
+            CheckoutInitiator(
+                unitOfWork: unitOfWork,
+                gateway: paymentGateway,
+                sessionDataSourceFactory: checkoutSessionDataSourceFactory,
+                sessionMapper: checkoutSessionMapper,
+                invoiceDataSourceFactory: invoiceDataSourceFactory,
+                invoiceMapper: invoiceMapper,
+                invoiceRepositoryFactory: invoiceRepositoryFactory,
+                orderRepositoryFactory: orderRepositoryFactory,
+                directTransaction: { [firestore] in FirestoreTransaction.direct(firestore: firestore) },
+                logger: app.logger
+            )
+        }
+    }
+
+    var purchaseSubscriptionFlow: PurchaseSubscriptionFlow {
+        resolver.resolve(\.purchaseSubscriptionFlow) {
+            PurchaseSubscriptionFlow(
+                purchase: purchaseSubscriptionCommandHandler,
+                checkout: checkoutInitiator
+            )
+        }
+    }
+
     // MARK: Purchases — Payment Gateway
 
     var paymentGateway: any PaymentGateway {

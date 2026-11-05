@@ -56,6 +56,11 @@ func routes(_ app: Application) throws {
     )
     try admin.register(collection: PlanRouteV1(controller: planController))
 
+    // Purchases: `POST /accounts/:accountId/purchases` (any authenticated user; the use
+    // case enforces account membership).
+    let purchaseController = PurchaseController(purchaseFlow: app.deps.purchaseSubscriptionFlow)
+    try authenticated.register(collection: PurchaseRouteV1(controller: purchaseController))
+
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
     let userController = UserController(

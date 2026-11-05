@@ -132,6 +132,11 @@ extension Application {
         var checkoutSessionDataSourceFactory: DataSourceFactory<CheckoutSessionModel> { get }
         var orderRepositoryFactory: RepositoryFactory<any OrderRepository> { get }
         var invoiceRepositoryFactory: RepositoryFactory<any InvoiceRepository> { get }
+        var checkoutLockDataSourceFactory: DataSourceFactory<CheckoutLockModel> { get }
+        var purchaseSubscriptionUseCaseFactory: UseCaseFactory<PurchaseSubscriptionUseCase> { get }
+        var purchaseSubscriptionCommandHandler: PurchaseSubscriptionCommandHandler { get }
+        var checkoutInitiator: CheckoutInitiator { get }
+        var purchaseSubscriptionFlow: PurchaseSubscriptionFlow { get }
     }
 
     // MARK: - CompositionRoot

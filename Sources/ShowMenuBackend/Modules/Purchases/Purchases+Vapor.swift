@@ -12,3 +12,11 @@ extension PaymentGatewayError: HTTPStatusHinted {
         }
     }
 }
+
+extension PendingCheckoutSessionError: HTTPStatusHinted {
+    var httpStatusHint: HTTPResponseStatus { .conflict }
+}
+
+extension CustomerNotFoundError: HTTPStatusHinted {
+    var httpStatusHint: HTTPResponseStatus { .notFound }
+}
