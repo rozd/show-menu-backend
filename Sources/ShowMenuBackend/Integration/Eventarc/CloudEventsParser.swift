@@ -6,13 +6,14 @@ enum CloudEventsParser {
     static let supportedEventTypes: Set<String> = [
         CloudEventsHeaders.firebaseAuthUserCreated,
         CloudEventsHeaders.firebaseAuthUserDeleted,
+        CloudEventsHeaders.firestoreDocumentCreated,
     ]
 
-    /// Parses and validates a CloudEvents webhook request
-    /// - Parameter request: The incoming HTTP request
-    /// - Returns: Tuple of parsed headers and auth event data
+    /// Parses and validates the CloudEvents headers of a webhook request
+    /// (spec version, supported type, freshness). The body is decoded by the
+    /// caller, because its shape depends on `headers.type`.
     /// - Throws: CloudEventsError or Vapor Abort if validation fails
-    static func parse(_ request: Request) async throws -> (headers: CloudEventsHeaders, data: AuthEventData) {
+    static func parseHeaders(_ request: Request) throws -> CloudEventsHeaders {
         // Parse and validate headers
         let headers = try CloudEventsHeaders.from(request)
 
@@ -27,6 +28,16 @@ enum CloudEventsParser {
 
         // Validate timestamp is recent (prevents replay attacks)
         try headers.validateTimestamp()
+
+        return headers
+    }
+
+    /// Parses and validates a Firebase Auth CloudEvents webhook request
+    /// - Parameter request: The incoming HTTP request
+    /// - Returns: Tuple of parsed headers and auth event data
+    /// - Throws: CloudEventsError or Vapor Abort if validation fails
+    static func parse(_ request: Request) async throws -> (headers: CloudEventsHeaders, data: AuthEventData) {
+        let headers = try parseHeaders(request)
 
         // Parse request body
         let authData = try request.content.decode(AuthEventData.self)

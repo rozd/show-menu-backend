@@ -132,4 +132,38 @@ extension Application.CompositionRoot {
             )
         }
     }
+
+    // MARK: IAM — account linking (S08)
+
+    var userLinkAccountUseCaseFactory: UseCaseFactory<UserLinkAccountUseCase> {
+        resolver.resolve(\.userLinkAccountUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                UserLinkAccountUseCase(
+                    context: ctx,
+                    repositoryFactory: userRepositoryFactory,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var linkAccountToCreatorCommandHandler: LinkAccountToCreatorCommandHandler {
+        resolver.resolve(\.linkAccountToCreatorCommandHandler) {
+            LinkAccountToCreatorCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: userLinkAccountUseCaseFactory,
+                inbox: InboxComponents(storeFactory: inboxStoreFactory),
+                logger: app.logger
+            )
+        }
+    }
+
+    var linkAccountOnAccountCreatedHandler: LinkAccountOnAccountCreatedHandler {
+        resolver.resolve(\.linkAccountOnAccountCreatedHandler) {
+            LinkAccountOnAccountCreatedHandler(
+                commandHandler: linkAccountToCreatorCommandHandler,
+                logger: app.logger
+            )
+        }
+    }
 }

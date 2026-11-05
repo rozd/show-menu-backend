@@ -105,6 +105,21 @@ extension Application {
         var userCreatedIntegrationEventHandler: UserCreatedIntegrationEventHandler { get }
         var userDeletedIntegrationEventHandler: UserDeletedIntegrationEventHandler { get }
         // USER_LIFECYCLE_END
+
+        // MARK: IAM — account linking (S08)
+
+        var userLinkAccountUseCaseFactory: UseCaseFactory<UserLinkAccountUseCase> { get }
+        var linkAccountToCreatorCommandHandler: LinkAccountToCreatorCommandHandler { get }
+        var linkAccountOnAccountCreatedHandler: LinkAccountOnAccountCreatedHandler { get }
+
+        // MARK: Accounts
+
+        var accountMapper: AccountMapper { get }
+        var accountDataSourceFactory: DataSourceFactory<AccountModel> { get }
+        var accountPermissionStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any AccountPermissionStore { get }
+        var grantAccountOwnerPermissionUseCaseFactory: UseCaseFactory<GrantAccountOwnerPermissionUseCase> { get }
+        var grantAccountOwnerPermissionCommandHandler: GrantAccountOwnerPermissionCommandHandler { get }
+        var grantOwnerPermissionOnAccountCreatedHandler: GrantOwnerPermissionOnAccountCreatedHandler { get }
     }
 
     // MARK: - CompositionRoot
