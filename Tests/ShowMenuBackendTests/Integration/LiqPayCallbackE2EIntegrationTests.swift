@@ -166,4 +166,177 @@ struct LiqPayCallbackE2EIntegrationTests {
         let unknown = try await post(#"{"order_id":"invoice-e2e-unknown-\#(suffix)","status":"success","payment_id":5}"#)
         #expect(unknown.status == .ok)
     }
+
+    /// Roadmap S14 "Done": the signed `success` callback activates the subscription (deterministic
+    /// id, correct `expiresAt`), a duplicate leaves exactly one, a renewal extends by one period,
+    /// and a failed recurring charge / unsubscribe on the paid invoice suspend / cancel it.
+    @Test(.enabled(if: LiqPayCallbackE2EIntegrationTests.isAvailable))
+    func callbacksDriveTheSubscriptionLifecycle() async throws {
+        let base = try #require(Self.baseURL)
+        let firestore = try EmulatorFirestoreHelper.makeFirestore()
+        let direct = FirestoreTransaction.direct(firestore: firestore)
+        let app = try await Application.make(.testing)
+        defer { Task { try? await app.asyncShutdown() } }
+
+        let suffix = EmulatorFirestoreHelper.uniqueId().lowercased()
+        let planId = "plan-e2e-sub-\(suffix)", accountId = "account-e2e-sub-\(suffix)", uid = "uid-e2e-sub-\(suffix)"
+        let now = Timestamp(exact: Date())
+        try await firestore.document("plans/\(planId)").setData([
+            "id": planId, "SKU": "E2E-SUB-\(suffix)", "name": ["en": "E2E"], "description": ["en": "E2E"],
+            "isActive": true, "createdAt": now, "updatedAt": now,
+            "prices": [["duration": "monthly", "price": [
+                "amount": 100, "currency": ["name": "USD", "symbol": "$", "base": 100, "digits": 2] as [String: Any],
+            ] as [String: Any]] as [String: Any]],
+            "features": [["featureId": "feature-e2e", "quota": ["unit": "count", "limit": 100] as [String: Any]] as [String: Any]],
+        ] as [String: Any], firestore: firestore)
+        try await firestore.document("accounts/\(accountId)").setData([
+            "name": "E2E", "creator": uid, "createdAt": now, "updatedAt": now,
+        ] as [String: Any], firestore: firestore)
+
+        let purchase = try await app.client.post(URI(string: "\(base)/api/v1/accounts/\(accountId)/purchases")) { req in
+            req.headers.bearerAuthorization = .init(token: token(uid: uid, email: "\(uid)@example.com"))
+            req.headers.contentType = .json
+            req.body = ByteBuffer(string: """
+            {"planId":"\(planId)","price":{"duration":"monthly","price":{"amount":100,"currencyName":"USD","currencySymbol":"$","currencyBase":100,"currencyDigits":2}}}
+            """)
+        }
+        #expect(purchase.status == .ok)
+        let invoiceId = try #require(purchase.body.map { String(buffer: $0) })
+
+        func data(_ path: String) async throws -> [String: Any] {
+            let snapshot = try await firestore.document(path).getDocument(firestore: firestore)
+            return try #require(snapshot.data(), "\(path) should exist")
+        }
+        func subscriptions() async throws -> [[String: Any]] {
+            let query = direct.collection("accounts/\(accountId)/subscriptions").and([])
+            return try await direct.get(query: query).documents.compactMap { $0.data() }
+        }
+        func post(_ payload: String) async throws -> ClientResponse {
+            let signed = LiqPayFixtures.callback(json: payload, privateKey: FakePaymentGateway.emulatorPrivateKey)
+            return try await app.client.post(URI(string: "\(base)/api/v1/payments/liqpay/callback")) { req in
+                req.headers.contentType = .urlEncodedForm
+                req.body = formEncoded([("data", signed.data), ("signature", signed.signature)])
+            }
+        }
+        func expiresAt(_ doc: [String: Any]) throws -> Date {
+            try #require((doc["expiresAt"] as? Timestamp)?.asDate)
+        }
+
+        let orderId = try #require(try await data("invoices/\(invoiceId)")["orderId"] as? String)
+        let subscriptionId = "sub:" + orderId.dropFirst("order-".count)
+        #expect(try await subscriptions().isEmpty)
+
+        // 1. success -> one active subscription with the derived id and a one-month expiry.
+        let before = Date()
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"success","payment_id":1001,"transaction_id":1001}"#).status == .ok)
+        var docs = try await subscriptions()
+        #expect(docs.count == 1)
+        var doc = try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")
+        #expect(doc["id"] as? String == subscriptionId)
+        #expect(doc["status"] as? String == "active")
+        #expect(doc["planId"] as? String == planId && doc["orderId"] as? String == orderId)
+        #expect(doc["accountId"] as? String == accountId)
+        #expect(doc["suspensionReason"] is NSNull && doc["cancellationReason"] is NSNull)
+        #expect(doc["startedAt"] is Timestamp && doc["createdAt"] is Timestamp && doc["updatedAt"] is Timestamp)
+        let started = try #require((doc["startedAt"] as? Timestamp)?.asDate)
+        #expect(started >= before.addingTimeInterval(-2) && started <= Date().addingTimeInterval(2))
+        let firstExpiry = try expiresAt(doc)
+        #expect(abs(firstExpiry.timeIntervalSince(SubscriptionDuration.monthly.add(to: started))) < 0.01)
+
+        // 2. LiqPay retries the same callback: still one document, same expiry.
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"success","payment_id":1001,"transaction_id":1001}"#).status == .ok)
+        docs = try await subscriptions()
+        #expect(docs.count == 1)
+        #expect(try expiresAt(try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")) == firstExpiry)
+
+        // 3. A renewal (new payment) extends by exactly one more period.
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"success","payment_id":1002,"transaction_id":1002,"action":"regular"}"#).status == .ok)
+        doc = try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")
+        #expect(try await subscriptions().count == 1)
+        let renewedExpiry = try expiresAt(doc)
+        #expect(abs(renewedExpiry.timeIntervalSince(SubscriptionDuration.monthly.add(to: firstExpiry))) < 0.01)
+        #expect(doc["status"] as? String == "active")
+
+        // 4. A failed recurring charge suspends it; the expiry is untouched.
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"failure","payment_id":1003,"err_code":"limit"}"#).status == .ok)
+        doc = try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")
+        #expect(doc["status"] as? String == "suspended" && doc["suspensionReason"] as? String == "Payment failed")
+        #expect(try expiresAt(doc) == renewedExpiry)
+
+        // 5. The next successful charge reactivates it and extends again.
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"success","payment_id":1004,"transaction_id":1004}"#).status == .ok)
+        doc = try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")
+        #expect(doc["status"] as? String == "active" && doc["suspensionReason"] is NSNull)
+        #expect(abs(try expiresAt(doc).timeIntervalSince(SubscriptionDuration.monthly.add(to: renewedExpiry))) < 0.01)
+
+        // 6. Unsubscribing cancels it; the invoice stays paid.
+        #expect(try await post(#"{"order_id":"\#(invoiceId)","status":"unsubscribed","payment_id":1005}"#).status == .ok)
+        doc = try await data("accounts/\(accountId)/subscriptions/\(subscriptionId)")
+        #expect(doc["status"] as? String == "cancelled" && doc["cancellationReason"] as? String == "Payment unsubscribed")
+        #expect(try await data("invoices/\(invoiceId)")["status"] as? String == "paid")
+        #expect(try await subscriptions().count == 1)
+    }
+
+    /// A subscription Node created under a random `sub:<uuid>` id is found by `orderId` (a direct
+    /// query on the real emulator) and extended in place: no second document is created.
+    @Test(.enabled(if: LiqPayCallbackE2EIntegrationTests.isAvailable))
+    func legacySubscriptionIsExtendedInPlace() async throws {
+        let base = try #require(Self.baseURL)
+        let firestore = try EmulatorFirestoreHelper.makeFirestore()
+        let direct = FirestoreTransaction.direct(firestore: firestore)
+        let app = try await Application.make(.testing)
+        defer { Task { try? await app.asyncShutdown() } }
+
+        let suffix = EmulatorFirestoreHelper.uniqueId().lowercased()
+        let planId = "plan-e2e-leg-\(suffix)", accountId = "account-e2e-leg-\(suffix)", uid = "uid-e2e-leg-\(suffix)"
+        let now = Timestamp(exact: Date())
+        try await firestore.document("plans/\(planId)").setData([
+            "id": planId, "SKU": "E2E-LEG-\(suffix)", "name": ["en": "E2E"], "description": ["en": "E2E"],
+            "isActive": true, "createdAt": now, "updatedAt": now,
+            "prices": [["duration": "monthly", "price": [
+                "amount": 100, "currency": ["name": "USD", "symbol": "$", "base": 100, "digits": 2] as [String: Any],
+            ] as [String: Any]] as [String: Any]],
+            "features": [["featureId": "feature-e2e", "quota": ["unit": "count", "limit": 100] as [String: Any]] as [String: Any]],
+        ] as [String: Any], firestore: firestore)
+        try await firestore.document("accounts/\(accountId)").setData([
+            "name": "E2E", "creator": uid, "createdAt": now, "updatedAt": now,
+        ] as [String: Any], firestore: firestore)
+        let purchase = try await app.client.post(URI(string: "\(base)/api/v1/accounts/\(accountId)/purchases")) { req in
+            req.headers.bearerAuthorization = .init(token: token(uid: uid, email: "\(uid)@example.com"))
+            req.headers.contentType = .json
+            req.body = ByteBuffer(string: """
+            {"planId":"\(planId)","price":{"duration":"monthly","price":{"amount":100,"currencyName":"USD","currencySymbol":"$","currencyBase":100,"currencyDigits":2}}}
+            """)
+        }
+        let invoiceId = try #require(purchase.body.map { String(buffer: $0) })
+        let invoice = try #require(try await firestore.document("invoices/\(invoiceId)").getDocument(firestore: firestore).data())
+        let orderId = try #require(invoice["orderId"] as? String)
+
+        // What the Node functions would have written for this order.
+        let legacyId = "sub:\(UUID().uuidString.lowercased())"
+        let started = Timestamp(exact: Date().addingTimeInterval(-86_400))
+        let expires = Timestamp(exact: Date().addingTimeInterval(20 * 86_400))
+        try await firestore.document("accounts/\(accountId)/subscriptions/\(legacyId)").setData([
+            "id": legacyId, "createdAt": started, "updatedAt": started, "planId": planId, "orderId": orderId,
+            "accountId": accountId, "status": "active", "startedAt": started, "expiresAt": expires,
+            "suspensionReason": NSNull(), "cancellationReason": NSNull(),
+        ] as [String: Any], firestore: firestore)
+
+        let signed = LiqPayFixtures.callback(
+            json: #"{"order_id":"\#(invoiceId)","status":"success","payment_id":2001,"transaction_id":2001}"#,
+            privateKey: FakePaymentGateway.emulatorPrivateKey
+        )
+        let response = try await app.client.post(URI(string: "\(base)/api/v1/payments/liqpay/callback")) { req in
+            req.headers.contentType = .urlEncodedForm
+            req.body = formEncoded([("data", signed.data), ("signature", signed.signature)])
+        }
+        #expect(response.status == .ok)
+
+        let docs = try await direct.get(query: direct.collection("accounts/\(accountId)/subscriptions").and([])).documents
+        #expect(docs.count == 1)
+        let doc = try #require(docs.first?.data())
+        #expect(doc["id"] as? String == legacyId)
+        let newExpiry = try #require((doc["expiresAt"] as? Timestamp)?.asDate)
+        #expect(abs(newExpiry.timeIntervalSince(SubscriptionDuration.monthly.add(to: expires.asDate))) < 0.01)
+    }
 }
