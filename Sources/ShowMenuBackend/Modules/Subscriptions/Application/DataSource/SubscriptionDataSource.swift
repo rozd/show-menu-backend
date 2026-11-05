@@ -1,0 +1,2 @@
+protocol SubscriptionDataSource: QueryableDataSource<SubscriptionModel> {
+}

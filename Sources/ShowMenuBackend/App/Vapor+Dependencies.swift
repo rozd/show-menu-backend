@@ -142,6 +142,16 @@ extension Application {
         var invoiceStatusAuditStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any InvoiceStatusAuditStore { get }
         var handleLiqPayCallbackUseCaseFactory: UseCaseFactory<HandleLiqPayCallbackUseCase> { get }
         var handleLiqPayCallbackCommandHandler: HandleLiqPayCallbackCommandHandler { get }
+
+        // MARK: Subscriptions
+
+        var subscriptionMapper: SubscriptionMapper { get }
+        var subscriptionDataSourceFactory: DataSourceFactory<SubscriptionModel> { get }
+        var subscriptionRepositoryFactory: RepositoryFactory<any SubscriptionRepository> { get }
+        var activateSubscriptionUseCaseFactory: UseCaseFactory<ActivateSubscriptionUseCase> { get }
+        var suspendSubscriptionUseCaseFactory: UseCaseFactory<SuspendSubscriptionUseCase> { get }
+        var cancelSubscriptionUseCaseFactory: UseCaseFactory<CancelSubscriptionUseCase> { get }
+        var subscriptionInvoiceEventHandler: SubscriptionInvoiceEventHandler { get }
     }
 
     // MARK: - CompositionRoot
