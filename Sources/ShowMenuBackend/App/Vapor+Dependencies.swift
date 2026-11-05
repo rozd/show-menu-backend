@@ -139,6 +139,9 @@ extension Application {
         var purchaseSubscriptionFlow: PurchaseSubscriptionFlow { get }
         var cancelPurchaseUseCaseFactory: UseCaseFactory<CancelPurchaseUseCase> { get }
         var cancelPurchaseCommandHandler: CancelPurchaseCommandHandler { get }
+        var invoiceStatusAuditStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any InvoiceStatusAuditStore { get }
+        var handleLiqPayCallbackUseCaseFactory: UseCaseFactory<HandleLiqPayCallbackUseCase> { get }
+        var handleLiqPayCallbackCommandHandler: HandleLiqPayCallbackCommandHandler { get }
     }
 
     // MARK: - CompositionRoot

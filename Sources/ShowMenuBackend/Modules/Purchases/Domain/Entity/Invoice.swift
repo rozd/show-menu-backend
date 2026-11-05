@@ -118,6 +118,32 @@ final class Invoice: AggregateRoot, @unchecked Sendable {
         return changed
     }
 
+    /// A further payment for an invoice that is already `paid`: a subscription renewal.
+    ///
+    /// The payment identity is `transactionId` (the LiqPay transaction/payment id). A *different*
+    /// identity than the stored one replaces it and records the semantic `invoice.renewed`
+    /// event. A legacy invoice with no identity yet (paid before it was tracked) just adopts
+    /// the identity, without an event, so the next distinct payment is detected. The same
+    /// identity (a redelivery under another status string) or none at all changes nothing.
+    /// Returns `true` when the state changed (the caller must persist). Not `paid` -> throws
+    /// ``InvalidStatusTransitionError``.
+    @discardableResult
+    func renew(transactionId newTransactionId: String?, now: Date = .now) throws -> Bool {
+        guard status == .paid else {
+            throw InvalidStatusTransitionError(
+                aggregate: "invoice", id: id.rawValue, from: status.rawValue, to: InvoiceStatus.paid.rawValue
+            )
+        }
+        guard let newTransactionId, !newTransactionId.isEmpty, newTransactionId != transactionId else { return false }
+        let hadIdentity = transactionId != nil
+        transactionId = newTransactionId
+        updatedAt = now
+        if hadIdentity {
+            record(event: .semantic(.invoiceRenewed, aggregateId: id, occurredAt: now))
+        }
+        return true
+    }
+
     @discardableResult
     func fail(now: Date = .now) throws -> Bool {
         try move(to: .failed, event: .invoiceFailed, now: now)
