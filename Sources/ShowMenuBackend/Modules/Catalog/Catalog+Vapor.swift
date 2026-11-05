@@ -8,3 +8,7 @@ extension PlanDTO: Content {}
 extension PlanSKUAlreadyExistsError: HTTPStatusHinted {
     var httpStatusHint: HTTPResponseStatus { .conflict }
 }
+
+extension PlanFeatureNotFoundError: HTTPStatusHinted {
+    var httpStatusHint: HTTPResponseStatus { .notFound }
+}

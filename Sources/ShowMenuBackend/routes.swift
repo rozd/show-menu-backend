@@ -42,11 +42,16 @@ func routes(_ app: Application) throws {
     )
     try admin.register(collection: FeatureRouteV1(controller: featureController))
 
-    // Catalog: `POST /plans`, `GET /plans`, `GET /plans/:planId` (admin-only).
+    // Catalog: `/plans` create/list/get/update/activate/deactivate/features (admin-only).
     let planController = PlanController(
         createPlanCommandHandler: app.deps.createPlanCommandHandler,
         getPlanQueryHandler: app.deps.getPlanQueryHandler,
-        listPlansQueryHandler: app.deps.listPlansQueryHandler
+        listPlansQueryHandler: app.deps.listPlansQueryHandler,
+        updatePlanCommandHandler: app.deps.updatePlanCommandHandler,
+        activatePlanCommandHandler: app.deps.activatePlanCommandHandler,
+        deactivatePlanCommandHandler: app.deps.deactivatePlanCommandHandler,
+        addPlanFeatureCommandHandler: app.deps.addPlanFeatureCommandHandler,
+        removePlanFeatureCommandHandler: app.deps.removePlanFeatureCommandHandler
     )
     try admin.register(collection: PlanRouteV1(controller: planController))
 

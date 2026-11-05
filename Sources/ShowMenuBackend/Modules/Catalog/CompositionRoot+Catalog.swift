@@ -123,6 +123,68 @@ extension Application.CompositionRoot {
         }
     }
 
+    var updatePlanUseCaseFactory: UseCaseFactory<UpdatePlanUseCase> {
+        resolver.resolve(\.updatePlanUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                UpdatePlanUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    mapper: planMapper,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var activatePlanUseCaseFactory: UseCaseFactory<ActivatePlanUseCase> {
+        resolver.resolve(\.activatePlanUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                ActivatePlanUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var deactivatePlanUseCaseFactory: UseCaseFactory<DeactivatePlanUseCase> {
+        resolver.resolve(\.deactivatePlanUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                DeactivatePlanUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var addPlanFeatureUseCaseFactory: UseCaseFactory<AddPlanFeatureUseCase> {
+        resolver.resolve(\.addPlanFeatureUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                AddPlanFeatureUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    mapper: planMapper,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var removePlanFeatureUseCaseFactory: UseCaseFactory<RemovePlanFeatureUseCase> {
+        resolver.resolve(\.removePlanFeatureUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                RemovePlanFeatureUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    logger: logger
+                )
+            }
+        }
+    }
+
     // MARK: Catalog — Command Handlers
 
     var createFeatureCommandHandler: CreateFeatureCommandHandler {
@@ -150,6 +212,56 @@ extension Application.CompositionRoot {
             CreatePlanCommandHandler(
                 unitOfWork: unitOfWork,
                 useCaseFactory: createPlanUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var updatePlanCommandHandler: UpdatePlanCommandHandler {
+        resolver.resolve(\.updatePlanCommandHandler) {
+            UpdatePlanCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: updatePlanUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var activatePlanCommandHandler: ActivatePlanCommandHandler {
+        resolver.resolve(\.activatePlanCommandHandler) {
+            ActivatePlanCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: activatePlanUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var deactivatePlanCommandHandler: DeactivatePlanCommandHandler {
+        resolver.resolve(\.deactivatePlanCommandHandler) {
+            DeactivatePlanCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: deactivatePlanUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var addPlanFeatureCommandHandler: AddPlanFeatureCommandHandler {
+        resolver.resolve(\.addPlanFeatureCommandHandler) {
+            AddPlanFeatureCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: addPlanFeatureUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var removePlanFeatureCommandHandler: RemovePlanFeatureCommandHandler {
+        resolver.resolve(\.removePlanFeatureCommandHandler) {
+            RemovePlanFeatureCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: removePlanFeatureUseCaseFactory,
                 logger: app.logger
             )
         }
