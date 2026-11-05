@@ -16,7 +16,8 @@ Every failure — handler errors, Vapor's own 404 for unknown routes, malformed 
 |---|---|---|
 | `ApplicationError.notFound` | 404 | `not_found` |
 | `ApplicationError.invalidInput`, `ValidationError`, Vapor `ValidationsError` | 422 | `validation_failed` |
-| other `DomainError` | 409 | `domain_rule_violation` |
+| other `DomainError` | 409 (provisional default) | `domain_rule_violation` |
+| `DomainError & HTTPStatusHinted` | `httpStatusHint` | derived from the status |
 | `ConcurrencyError` | 409 | `version_conflict` |
 | `AuthorizationError.denied` / `.missingPrincipal` | 403 / 401 | `forbidden` / `unauthorized` |
 | `IdempotencyError` | 400 / 409 / 422 / 500 | `idempotency_key_invalid` / `request_in_progress` / `idempotency_key_reused` / `internal_error` |
@@ -32,3 +33,11 @@ Specific cases first, `AbortError` after, so typed errors keep their stable `cod
 - **Edge (shape):** Vapor `Validatable` on request DTOs (`try Payload.validate(content: req)`) for presence/format/length. Failures become 422 with per-field `details`.
 - **Domain (invariants):** entities and value objects throw `ValidationError` (`LocalizedString`, `Currency`, `Price`, `Item.validate`). Never rely on edge validation for an invariant.
 - DTO-level semantic rules that differ from the domain (e.g. `PriceDTO.amount > 0` while `Price` allows 0) live in the DTO's `validate()` and throw a `ValidationError`.
+
+## DomainError statuses (convention)
+
+The plain-`DomainError` → 409 default is **provisional**. A rule violation that is really a client-input problem (plan not active, price mismatch → 422) must either conform to `ValidationError` (422) or adopt `HTTPStatusHinted` and return an explicit `httpStatusHint`. Pick the explicit hint when the status is neither 422 nor 409. Never rely on the 409 default for new errors.
+
+## Middleware order
+
+`entrypoint` installs the Cloud Run trace middleware first; `useErrorEnvelope()` preserves all installed middleware, removes only Vapor's `ErrorMiddleware`, and inserts ours right after the trace middleware: trace → error envelope → everything else.

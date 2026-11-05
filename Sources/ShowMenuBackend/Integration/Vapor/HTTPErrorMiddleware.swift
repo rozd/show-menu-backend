@@ -20,6 +20,14 @@ struct ErrorEnvelope: Content, Equatable {
     let error: Body
 }
 
+/// Opt-in status override for a `DomainError` that is neither a
+/// `ValidationError` (422) nor a plain rule violation (409 default).
+/// Conform in the domain-error enum; the domain stays Vapor-free by using the
+/// status helpers below rather than importing HTTP concepts in logic.
+protocol HTTPStatusHinted: Error {
+    var httpStatusHint: HTTPResponseStatus { get }
+}
+
 // MARK: - Mapping
 
 /// Pure error → HTTP mapping table (kept free of Vapor `Request` so it is
@@ -49,6 +57,8 @@ struct HTTPErrorMapping: Equatable {
             case let .notFound(entity, id): return .init(.notFound, "not_found", "\(entity) \(id) not found")
             case let .invalidInput(reason): return .init(.unprocessableEntity, "validation_failed", reason)
             }
+        case let e as any HTTPStatusHinted:
+            return .init(e.httpStatusHint, code(for: e.httpStatusHint), describe(e))
         case let e as any ValidationError:
             return .init(.unprocessableEntity, "validation_failed", describe(e))
         case let e as any DomainError:
@@ -182,10 +192,17 @@ struct HTTPErrorMiddleware: AsyncMiddleware {
 }
 
 extension Application {
-    /// Makes `HTTPErrorMiddleware` the sole error handler: drops Vapor's default
-    /// `ErrorMiddleware` and installs ours first (outermost).
+    /// Makes `HTTPErrorMiddleware` the sole error handler. Keeps every other
+    /// middleware already installed (notably the Cloud Run trace middleware that
+    /// `entrypoint` adds first), drops Vapor's default `ErrorMiddleware`, and
+    /// inserts ours right after a leading trace middleware (else first), giving
+    /// trace → error envelope → everything else.
     func useErrorEnvelope() {
+        let existing = middleware.resolve().filter { !($0 is ErrorMiddleware) && !($0 is HTTPErrorMiddleware) }
+        var rebuilt: [any Middleware] = existing
+        let traceCount = existing.prefix { $0 is GoogleCloudPlatformTraceMiddleware }.count
+        rebuilt.insert(HTTPErrorMiddleware(), at: traceCount)
         middleware = .init()
-        middleware.use(HTTPErrorMiddleware())
+        for m in rebuilt { middleware.use(m) }
     }
 }
