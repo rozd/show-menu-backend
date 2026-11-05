@@ -21,4 +21,14 @@ struct FirestoreAccountPermissionStore: AccountPermissionStore {
             throw FirestoreError.from(grpcError: error)
         }
     }
+
+    func fetch(accountId: String, userId: String) async throws -> AccountPermissionModel? {
+        let path = [prefix, "accounts", accountId, "permissions"].filter { !$0.isEmpty }.joined(separator: "/")
+        do {
+            let docRef = transaction.collection(path).document(userId)
+            return try await transaction.getDocument(AccountPermissionModel.self, documentReference: docRef)
+        } catch {
+            throw FirestoreError.from(grpcError: error)
+        }
+    }
 }

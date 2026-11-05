@@ -25,3 +25,28 @@ struct OrderInvoiceAlreadyCreatedError: DomainError, LocalizedError, Equatable {
 
     var errorDescription: String? { "Order \(orderId.rawValue) already has an invoice" }
 }
+
+/// The plan exists but is not on sale (`isActive == false`). 422.
+struct PlanNotActiveError: ValidationError, LocalizedError, Equatable {
+    let planId: String
+    var errorDescription: String? { "Plan \(planId) is not active" }
+}
+
+/// The requested price is not one of the plan's prices (D9: duration + currency name +
+/// amount must match). 422 (Node threw a plain `Error`, which surfaced as 500).
+struct PlanPriceMismatchError: ValidationError, LocalizedError, Equatable {
+    let planId: String
+    var errorDescription: String? { "Invalid price for plan \(planId)" }
+}
+
+/// The account already has a pending checkout session. 409 (`Purchases+Vapor.swift`).
+struct PendingCheckoutSessionError: DomainError, LocalizedError, Equatable {
+    let accountId: String
+    var errorDescription: String? { "There is already a pending order" }
+}
+
+/// There is neither a `users/{uid}` document nor a token email to bill. 404 (`Purchases+Vapor.swift`).
+struct CustomerNotFoundError: DomainError, LocalizedError, Equatable {
+    let userId: String
+    var errorDescription: String? { "Customer not found" }
+}

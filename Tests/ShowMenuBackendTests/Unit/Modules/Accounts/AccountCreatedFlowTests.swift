@@ -17,6 +17,10 @@ struct AccountCreatedFlowTests {
             docs["accounts/\(accountId)/permissions/\(userId)"] = permission
             writes += 1
         }
+
+        func fetch(accountId: String, userId: String) async throws -> AccountPermissionModel? {
+            docs["accounts/\(accountId)/permissions/\(userId)"]
+        }
     }
 
     private struct SUT {

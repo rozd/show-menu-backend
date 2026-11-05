@@ -45,3 +45,17 @@ struct FirestoreCheckoutSessionDataSource: FirestoreDataSource, CheckoutSessionD
         model.invoiceId
     }
 }
+
+/// `checkout_locks` — the document id is the account id.
+struct FirestoreCheckoutLockDataSource: FirestoreDataSource, CheckoutLockDataSource {
+    typealias Model = CheckoutLockModel
+
+    let transaction: FirestoreTransaction
+    let prefix: String
+    let suffix = "checkout_locks"
+    let logger: Logger
+
+    func documentId(for model: CheckoutLockModel) -> String {
+        model.accountId
+    }
+}
