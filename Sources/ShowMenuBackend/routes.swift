@@ -56,9 +56,12 @@ func routes(_ app: Application) throws {
     )
     try admin.register(collection: PlanRouteV1(controller: planController))
 
-    // Purchases: `POST /accounts/:accountId/purchases` (any authenticated user; the use
+    // Purchases: `POST /accounts/:accountId/purchases` and `DELETE .../purchases/:invoiceId` (any authenticated user; the use
     // case enforces account membership).
-    let purchaseController = PurchaseController(purchaseFlow: app.deps.purchaseSubscriptionFlow)
+    let purchaseController = PurchaseController(
+        purchaseFlow: app.deps.purchaseSubscriptionFlow,
+        cancelPurchaseCommandHandler: app.deps.cancelPurchaseCommandHandler
+    )
     try authenticated.register(collection: PurchaseRouteV1(controller: purchaseController))
 
     // USER_LIFECYCLE_BEGIN

@@ -137,6 +137,8 @@ extension Application {
         var purchaseSubscriptionCommandHandler: PurchaseSubscriptionCommandHandler { get }
         var checkoutInitiator: CheckoutInitiator { get }
         var purchaseSubscriptionFlow: PurchaseSubscriptionFlow { get }
+        var cancelPurchaseUseCaseFactory: UseCaseFactory<CancelPurchaseUseCase> { get }
+        var cancelPurchaseCommandHandler: CancelPurchaseCommandHandler { get }
     }
 
     // MARK: - CompositionRoot

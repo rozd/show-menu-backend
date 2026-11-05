@@ -56,12 +56,41 @@ final class FirestoreWriteTracker: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return count
     }
+
+    // MARK: Read cache
+
+    /// Document snapshots already read through this (live) transaction, by document path.
+    /// A transaction reads one consistent snapshot, so a repeated read of the same document
+    /// is answered locally. This is what lets several versioned aggregates be updated in one
+    /// unit of work: each check-and-set write re-reads its document (see
+    /// `FirestoreDataSource.update(model:ifMatching:)`), and the pinned client forbids reads
+    /// after the first write; the re-read hits the snapshot the repository's `fetch` took.
+    private var snapshots: [String: DocumentSnapshot] = [:]
+
+    func cachedSnapshot(for path: String) -> DocumentSnapshot? {
+        lock.lock(); defer { lock.unlock() }
+        return snapshots[path]
+    }
+
+    func cache(_ snapshot: DocumentSnapshot, for path: String) {
+        lock.lock(); defer { lock.unlock() }
+        snapshots[path] = snapshot
+    }
+
+    /// A write makes the cached snapshot stale; drop it (a later read then goes to the
+    /// server, as before).
+    func invalidate(path: String) {
+        lock.lock(); defer { lock.unlock() }
+        snapshots[path] = nil
+    }
 }
 
 struct FirestoreTransaction: @unchecked Sendable {
     nonisolated(unsafe) private let wrapped: any FirestoreTransactionProtocol
     private let referenceProvider: any FirestoreReferenceProvider
     let writeTracker = FirestoreWriteTracker()
+    /// Only a live transaction has a consistent snapshot to cache; direct reads never cache.
+    private let cachesReads: Bool
 
     init<Transport: ClientTransport>(
         wrapping transaction: Transaction<Transport>,
@@ -69,14 +98,17 @@ struct FirestoreTransaction: @unchecked Sendable {
     ) {
         self.wrapped = transaction
         self.referenceProvider = firestore
+        self.cachesReads = true
     }
 
     init(
         wrapping protocol: any FirestoreTransactionProtocol,
-        referenceProvider: any FirestoreReferenceProvider
+        referenceProvider: any FirestoreReferenceProvider,
+        cachesReads: Bool = false
     ) {
         self.wrapped = `protocol`
         self.referenceProvider = referenceProvider
+        self.cachesReads = cachesReads
     }
 
     // MARK: Reference Forming
@@ -106,7 +138,11 @@ struct FirestoreTransaction: @unchecked Sendable {
     // MARK: Transactional Reads
 
     func get(documentReference: DocumentReference) async throws -> DocumentSnapshot {
-        try await wrapped.get(documentReference: documentReference)
+        guard cachesReads else { return try await wrapped.get(documentReference: documentReference) }
+        if let cached = writeTracker.cachedSnapshot(for: documentReference.path) { return cached }
+        let snapshot = try await wrapped.get(documentReference: documentReference)
+        writeTracker.cache(snapshot, for: documentReference.path)
+        return snapshot
     }
 
     func get(query: FirestoreAPI.Query) async throws -> QuerySnapshot {
@@ -117,26 +153,31 @@ struct FirestoreTransaction: @unchecked Sendable {
 
     func create(documentReference: DocumentReference, data: [String: Any]) async throws {
         writeTracker.recordWrite()
+        writeTracker.invalidate(path: documentReference.path)
         try await wrapped.create(documentReference: documentReference, data: data)
     }
 
     func set(documentReference: DocumentReference, data: [String: Any]) async throws {
         writeTracker.recordWrite()
+        writeTracker.invalidate(path: documentReference.path)
         try await wrapped.set(documentReference: documentReference, data: data)
     }
 
     func set(documentReference: DocumentReference, data: [String: Any], merge: Bool) async throws {
         writeTracker.recordWrite()
+        writeTracker.invalidate(path: documentReference.path)
         try await wrapped.set(documentReference: documentReference, data: data, merge: merge)
     }
 
     func update(documentReference: DocumentReference, data: [String: Any]) async throws {
         writeTracker.recordWrite()
+        writeTracker.invalidate(path: documentReference.path)
         try await wrapped.update(documentReference: documentReference, data: data)
     }
 
     func delete(documentReference: DocumentReference) async throws {
         writeTracker.recordWrite()
+        writeTracker.invalidate(path: documentReference.path)
         try await wrapped.delete(documentReference: documentReference)
     }
 }
