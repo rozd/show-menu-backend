@@ -21,11 +21,20 @@ struct UserOnboardUseCase: UseCase {
 
         let repository = repositoryFactory(context)
 
-        // Idempotent: if user already exists, succeed silently.
-        guard try await repository.fetch(byId: params.userId) == nil else {
-            logger.info("User already exists, skipping onboard", metadata: [
-                "userId": .string(params.userId.rawValue)
-            ])
+        // Idempotent: if the user already exists, succeed silently — except for a bare
+        // profile left by `UserLinkAccountUseCase` (account event overtook this one),
+        // which is completed from the Auth user. `accounts` is never touched.
+        if let existing = try await repository.fetch(byId: params.userId) {
+            if existing.completeProfile(email: params.email, name: params.name, avatarURL: params.avatarURL) {
+                logger.info("Completing the bare profile created by an account link", metadata: [
+                    "userId": .string(params.userId.rawValue)
+                ])
+                try await repository.update(entity: existing)
+            } else {
+                logger.info("User already exists, skipping onboard", metadata: [
+                    "userId": .string(params.userId.rawValue)
+                ])
+            }
             return
         }
 

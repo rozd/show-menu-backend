@@ -73,6 +73,12 @@ private func configureIntegrationEvents(_ app: Application) async {
     await app.deps.integrationEventDispatcher.register(handler: app.deps.userCreatedIntegrationEventHandler)
     await app.deps.integrationEventDispatcher.register(handler: app.deps.userDeletedIntegrationEventHandler)
     // USER_LIFECYCLE_END
+
+    // Accounts: `accounts/{id}` created by a client → link to the creator (IAM) and
+    // grant the owner permission (Accounts). Two independent inboxed consumers.
+    await app.deps.integrationEventRegistry.register(AccountCreatedIntegrationEvent.self)
+    await app.deps.integrationEventDispatcher.register(handler: app.deps.linkAccountOnAccountCreatedHandler)
+    await app.deps.integrationEventDispatcher.register(handler: app.deps.grantOwnerPermissionOnAccountCreatedHandler)
 }
 
 // MARK: - Debugging Helpers

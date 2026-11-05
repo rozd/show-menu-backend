@@ -36,6 +36,9 @@ struct CloudEventsHeaders: Sendable {
 
     /// Firebase Auth user deleted event type
     static let firebaseAuthUserDeleted = "google.firebase.auth.user.v1.deleted"
+
+    /// Firestore document created event type (`firestore-forwarder`, gen-1 trigger)
+    static let firestoreDocumentCreated = "google.cloud.firestore.document.v1.created"
 }
 
 // MARK: - Parsing

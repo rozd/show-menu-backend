@@ -42,6 +42,25 @@ final class User: AggregateRoot, @unchecked Sendable {
         self.updatedAt = updatedAt ?? createdAt
     }
 
+    /// Whether this is a bare profile: no email, name or avatar. That is what
+    /// `UserLinkAccountUseCase` creates when the account-created event overtakes
+    /// the user-created one (such a user has never been onboarded).
+    var isBareProfile: Bool {
+        email == nil && name == nil && avatarURL == nil
+    }
+
+    /// Fills the profile of a bare profile from the Auth user. Returns whether
+    /// anything changed. Never overwrites existing data and never touches `accounts`.
+    @discardableResult
+    func completeProfile(email: String?, name: String?, avatarURL: String?, now: Date = .now) -> Bool {
+        guard isBareProfile, email != nil || name != nil || avatarURL != nil else { return false }
+        self.email = email
+        self.name = name
+        self.avatarURL = avatarURL
+        updatedAt = now
+        return true
+    }
+
     /// Links an account to this user. Idempotent: a duplicate is a no-op (no event,
     /// `updatedAt` kept). Records the semantic `user.account.added` event.
     func addAccount(_ accountId: String, now: Date = .now) {
