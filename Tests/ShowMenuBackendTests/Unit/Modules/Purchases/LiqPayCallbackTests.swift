@@ -283,6 +283,19 @@ struct LiqPayCallbackTests {
         #expect(eventKinds(sut) == ["invoice.charge_failed"])
     }
 
+    @Test("a late failure for the payment already applied is audited but suspends nothing")
+    func lateFailureForAppliedPayment() async throws {
+        let sut = try await makeSUT(sessionStatus: .success) { order, invoice in
+            try invoice.pay(transactionId: "tx-1")
+            try order.complete(invoiceId: invoice.id)
+        }
+        try await deliver(sut, payload(sut, status: "failure", paymentId: "tx-1"))
+        let s = try await state(sut)
+        #expect(s.invoice == .paid && s.order == .completed && s.session == .success)
+        #expect(eventKinds(sut).isEmpty)
+        #expect(await sut.audit.rows.count == 1)
+    }
+
     @Test("an order that cannot follow the invoice keeps both unchanged (all-or-nothing)")
     func orderRejects() async throws {
         // The order was failed by an earlier checkout failure, while the invoice is still pending.
