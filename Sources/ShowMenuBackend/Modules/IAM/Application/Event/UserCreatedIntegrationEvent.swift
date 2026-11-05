@@ -14,6 +14,8 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
     let userId: String
     let email: String?
     let displayName: String?
+    /// Optional: events recorded before this field existed decode with `nil`.
+    let photoURL: String?
     let registeredAt: Date
 
     init(
@@ -21,6 +23,7 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
         userId: String,
         email: String?,
         displayName: String?,
+        photoURL: String? = nil,
         registeredAt: Date = .now,
         correlationId: TraceID? = nil
     ) {
@@ -33,6 +36,7 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
         self.userId = userId
         self.email = email
         self.displayName = displayName
+        self.photoURL = photoURL
         self.registeredAt = registeredAt
     }
 }

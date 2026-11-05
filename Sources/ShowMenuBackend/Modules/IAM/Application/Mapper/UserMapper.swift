@@ -1,4 +1,5 @@
 import Foundation
+import FirestoreAPI
 
 struct UserMapper: Mapper, Sendable {
     typealias Entity = User
@@ -11,53 +12,55 @@ struct UserMapper: Mapper, Sendable {
         UserModel(
             id: entity.id.rawValue,
             email: entity.email,
-            displayName: entity.displayName,
-            photoURL: entity.photoURL,
-            emailVerified: entity.emailVerified,
-            disabled: entity.disabled,
+            name: entity.name,
+            avatarURL: entity.avatarURL,
+            accounts: entity.accounts,
+            // Not in Node's schema: only written when it matters.
+            disabled: entity.disabled ? true : nil,
             version: entity.version.versionInt,
-            createdAt: entity.createdAt
+            createdAt: Timestamp(exact: entity.createdAt),
+            updatedAt: Timestamp(exact: entity.updatedAt)
         )
     }
 
     func toEntity(model: UserModel) throws -> User {
-        User(
+        let createdAt = model.createdAt?.asDate ?? .now
+        return User(
             id: User.Id(rawValue: model.id),
             email: model.email,
-            displayName: model.displayName,
-            photoURL: model.photoURL,
-            emailVerified: model.emailVerified ?? false,
+            name: model.name,
+            avatarURL: model.avatarURL,
+            accounts: model.accounts ?? [],
             disabled: model.disabled ?? false,
             version: Version(versionInt: model.version),
-            createdAt: model.createdAt
+            createdAt: createdAt,
+            updatedAt: model.updatedAt?.asDate ?? createdAt
         )
     }
 
     func toDTO(entity: User) -> UserDTO {
-        let formatter = ISO8601DateFormatter()
-        return UserDTO(
+        UserDTO(
             id: entity.id.rawValue,
             email: entity.email,
-            displayName: entity.displayName,
-            photoURL: entity.photoURL,
-            emailVerified: entity.emailVerified,
-            disabled: entity.disabled,
+            name: entity.name,
+            avatarURL: entity.avatarURL,
+            accounts: entity.accounts,
             version: entity.version.rawValue,
-            createdAt: entity.createdAt.map { formatter.string(from: $0) }
+            createdAt: entity.createdAt.jsISOString,
+            updatedAt: entity.updatedAt.jsISOString
         )
     }
 
     func toDTO(model: UserModel) -> UserDTO {
-        let formatter = ISO8601DateFormatter()
-        return UserDTO(
+        UserDTO(
             id: model.id,
             email: model.email,
-            displayName: model.displayName,
-            photoURL: model.photoURL,
-            emailVerified: model.emailVerified ?? false,
-            disabled: model.disabled ?? false,
+            name: model.name,
+            avatarURL: model.avatarURL,
+            accounts: model.accounts ?? [],
             version: Version(versionInt: model.version).rawValue,
-            createdAt: model.createdAt.map { formatter.string(from: $0) }
+            createdAt: model.createdAt.map { $0.asDate.jsISOString },
+            updatedAt: model.updatedAt.map { $0.asDate.jsISOString }
         )
     }
 }

@@ -58,6 +58,7 @@ struct EventarcWebhookController: RouteCollection {
                 userId: authData.uid,
                 email: authData.email,
                 displayName: authData.displayName,
+                photoURL: authData.photoUrl,
                 registeredAt: headers.time,
                 correlationId: RequestContext.traceId ?? TraceID(stringLiteral: req.id)
             )

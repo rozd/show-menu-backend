@@ -13,7 +13,8 @@ func routes(_ app: Application) throws {
     // USER_LIFECYCLE_BEGIN
     // Eventarc webhook controller handles POST /
     // This receives CloudEvents from Firebase Auth triggers (forwarded by cloud-functions/auth-forwarder)
-    try app.register(collection: EventarcWebhookController())
+    // Guarded by Google OIDC verification (bypassed only in emulator mode).
+    try app.grouped(app.eventarcAuthMiddleware).register(collection: EventarcWebhookController())
     // USER_LIFECYCLE_END
 
     // All module routes live under `/api` (D3); `/health`, `/version` and
