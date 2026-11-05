@@ -366,7 +366,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - [x] S03 Authentication and admin guard
 - [x] S04 Catalog: Features (+ remove Items)
 - [x] S05 Plans: create, get, list
-- [ ] S06 Plans: mutations
+- [x] S06 Plans: mutations
 - [ ] S07 Users onboarding, admin claim, webhook auth
 - [ ] S08 Accounts linking (firestore-forwarder)
 - [ ] S09 LiqPay client
@@ -439,6 +439,17 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **S05:** `GET /plans` returns all plans, oldest first, unpaged (the harness does not list; Flutter streams the whole collection). `POST /plans` answers 200. `GET /plans/:planId` unknown → 404.
 - **S05:** `PlansGuardRouteV1` now only holds the `/plans/**` catch-all; the `GET /plans` stub is gone (`FirebaseAuthTests` registers its own stand-in). `InMemoryDataSource` gained an optional `matchesFilter`.
 - **S05:** Harness: `plans-lifecycle` create Feature ✓, create Plan ✓, activate ✕ (S06), fetch ✕ (GET returns 200; fails only on `isActive` because activate is S06). `auth-rbac` 4/4 ✓, `smoke` 2/2 ✓.
+
+### Decisions taken (S06)
+- **S06:** Endpoints (all `admin` group, Node status codes/bodies): `PUT /plans/:id` → 200 PlanResponse (replaces `name` + `description`; Node's DTO required both, so a missing one is now a 422 instead of 400); `PUT /plans/:id/activate|deactivate` → 200 empty body; `PUT /plans/:id/features` → 200 PlanResponse; `DELETE /plans/:id/features/:featureId` → 200 empty body, 404 (`PlanFeatureNotFoundError`) when the plan does not contain the feature; unknown plan → 404. Duplicate featureId, bad quota unit, missing quota/featureId → 422 (`Plan.Error`).
+- **S06:** **Removing the last feature → 422** (`Plan.Error.featuresRequired`, "Plan must have at least one feature"), nothing written. Node did the same in effect (`validate()` threw a plain `Error` after the in-memory mutation, so the transaction never wrote → 400 and no corrupt data); we validate before mutating and answer 422 per D4.
+- **S06:** Adding a feature does **not** check that the `featureId` exists in `features/` — Node did not either (only the unique-featureId invariant). Parity; a stricter check would need a cross-aggregate read and is a product decision.
+- **S06:** Bug 7 fixed: removal records semantic `plan.feature.removed` (`PlanEventKind.planFeatureRemoved`); add records `plan.feature.added`; activate/deactivate record `plan.activated`/`plan.deactivated`. Node's extra `plan.updated` is covered by the Repository's lifecycle `updated`.
+- **S06:** Activate/deactivate are idempotent for the aggregate (no semantic event, `updatedAt` kept) but the use case **still persists**: a Firestore transaction that commits without any write fails with `commitFailed` (found over HTTP on the emulator → 500; the in-memory double hides it). Side effect: an idempotent call still bumps `version` and records the lifecycle `updated` event, as Node's always-`updatePlan` did. **Later steps: never let a command handler path finish with a transaction that did only reads.**
+- **S06:** ETag/If-Match on `PUT /plans/:id` was **not** wired (optional; the CAS token is opaque and the command would need a precondition threaded through use case/repository). `AGENTS.md` now says it stays unwired.
+- **S06:** `PlansGuardRouteV1` now registers its `/plans/**` and bare `/plans` catch-alls for GET/POST/PUT/PATCH/DELETE, so anonymous → 401, non-admin → 403, admin → 404 on any unmatched `/plans` path (test: `guardCoversAllMethods`). Real routes are registered after it and win.
+- **S06:** `Timestamp(exact:)` is now **millisecond**-precise (floor to ms, like Node's `Timestamp.fromDate`; the date is first snapped to whole µs so a ms-aligned value never drifts, verified for all 1000 ms of a second). Applies to Feature and Plan `createdAt`/`updatedAt`. Verified on the emulator: stored nanos are multiples of 1e6.
+- **S06:** Harness: `plans-lifecycle` 4/4 ✓, `auth-rbac` 4/4 ✓, `smoke` 2/2 ✓. A throwaway HTTP script also exercised update/add/duplicate/remove/absent/last/idempotent-activate/unknown (not committed).
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.
