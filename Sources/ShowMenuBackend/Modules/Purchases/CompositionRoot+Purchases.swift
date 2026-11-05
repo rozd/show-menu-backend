@@ -164,6 +164,35 @@ extension Application.CompositionRoot {
         }
     }
 
+    var cancelPurchaseUseCaseFactory: UseCaseFactory<CancelPurchaseUseCase> {
+        resolver.resolve(\.cancelPurchaseUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                CancelPurchaseUseCase(
+                    context: ctx,
+                    accountDataSourceFactory: accountDataSourceFactory,
+                    accountMapper: accountMapper,
+                    permissionStoreFactory: accountPermissionStoreFactory,
+                    ability: AccountMemberAbility(),
+                    orderRepositoryFactory: orderRepositoryFactory,
+                    invoiceRepositoryFactory: invoiceRepositoryFactory,
+                    sessionDataSourceFactory: checkoutSessionDataSourceFactory,
+                    sessionMapper: checkoutSessionMapper,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var cancelPurchaseCommandHandler: CancelPurchaseCommandHandler {
+        resolver.resolve(\.cancelPurchaseCommandHandler) {
+            CancelPurchaseCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: cancelPurchaseUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
     // MARK: Purchases — Payment Gateway
 
     var paymentGateway: any PaymentGateway {

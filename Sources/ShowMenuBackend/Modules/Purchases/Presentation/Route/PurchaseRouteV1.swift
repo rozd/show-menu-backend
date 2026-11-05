@@ -11,5 +11,6 @@ struct PurchaseRouteV1: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let purchases = routes.grouped("v1", "accounts", ":accountId", "purchases")
         purchases.post(use: controller.purchase)
+        purchases.delete(":invoiceId", use: controller.cancel)
     }
 }
