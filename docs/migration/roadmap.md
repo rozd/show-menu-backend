@@ -362,7 +362,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 
 ## 6. Progress checklist
 - [x] S01 Local loop / `/api` / Echo / CI
-- [ ] S02 Error contract and shared kernel
+- [x] S02 Error contract and shared kernel
 - [ ] S03 Authentication and admin guard
 - [ ] S04 Catalog: Features (+ remove Items)
 - [ ] S05 Plans: create, get, list
@@ -398,6 +398,14 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **S01:** FirebaseAPI pinned to revision `c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a` (the previously resolved `main`).
 - **S01:** `firebase.vapor.json` omits hosting/storage/remoteconfig/extensions on purpose (no LiqPay extension in the Vapor loop). It does include firestore rules + indexes.
 - **S01:** CI runs in a `swift:6.2-noble` container on ubuntu-latest (not yet run on GitHub).
+
+### Decisions taken (S02)
+- **S02:** Harness only asserts status codes (`res.status`) — no check on the error body or `code` values, so the envelope is unconstrained by it. Codes are snake_case strings, listed in `docs/conventions/HTTPErrors.md`.
+- **S02:** `ValidationError` → 422, other `DomainError` → 409 (`domain_rule_violation`), `ApplicationError.invalidInput` → 422, `FirestoreError` transient → 503 (matches existing controllers). `Item.Error` still gives 400 because `ItemController` catches it first (Items is removed in S04).
+- **S02:** `app.useErrorEnvelope()` wipes `app.middleware` and installs `HTTPErrorMiddleware`; it must stay the first call in `configure`. Later steps add auth middleware after it.
+- **S02:** FirebaseAPI `Timestamp(_ date:)` truncates sub-seconds and `Date(timestamp:)` divides nanos by 1e6 (bug). Use `Timestamp(exact:)` / `.asDate` from `Integration/Firestore/Firestore+Timestamp.swift` in new models.
+- **S02:** `Currency` encodes absent `symbol/base/digits` as explicit `null` (Node shape); whether the Firestore encoder writes `null` for them is unverified until a model stores it (S04/S05 mapper round-trip).
+- **S02:** `Price.amount` is `Double`; `PrefixedEntityId` protocol gives `generate()` = `prefix + lowercase uuid`. Value objects live in `Modules/Shared/Domain`, `PriceDTO` in `Modules/Shared/Application/DTO`.
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.

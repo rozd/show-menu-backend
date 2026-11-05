@@ -6,6 +6,10 @@ public func configure(_ app: Application) async throws {
         app.http.server.configuration.port = port
     }
 
+    // Single error format for every failure (D4), replacing Vapor's default
+    // ErrorMiddleware. Must run before any other middleware is added.
+    app.useErrorEnvelope()
+
     // uncomment to serve files from /Public folder
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 
