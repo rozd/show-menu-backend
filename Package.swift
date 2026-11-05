@@ -15,6 +15,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         // 🔐 Cross-platform cryptography for JWT signing (works on macOS and Linux)
         .package(url: "https://github.com/apple/swift-crypto.git", from: "4.2.0"),
+        // 🔑 JWT verification for Firebase ID tokens (JWKS, RS256)
+        .package(url: "https://github.com/vapor/jwt.git", from: "5.1.0"),
         // 🔥 Firebase API - gRPC-based Firestore client
         //    Pinned to a revision (was `branch: main`); bump deliberately.
         .package(url: "https://github.com/Rsych/FirebaseAPI.git", revision: "c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a"),
@@ -29,6 +31,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "Queues", package: "queues"),
+                .product(name: "JWT", package: "jwt"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),

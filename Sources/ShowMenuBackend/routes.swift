@@ -20,16 +20,29 @@ func routes(_ app: Application) throws {
     // `POST /` stay at the root. Each RouteCollection adds its own `v1` segment.
     let api = app.grouped("api")
 
-    try api.register(collection: EchoRouteV1())
+    // Route groups (D5): `public` needs no token, `authenticated` needs a valid
+    // Firebase ID token (401), `admin` additionally needs the `admin` claim (403).
+    let verifier = app.firebaseTokenVerifier
+    let publicRoutes = api
+    let authenticated = api.grouped(FirebaseAuthMiddleware(verifier: verifier))
+    let admin = authenticated.grouped(RequireAdminMiddleware())
 
-    // Items (sample module)
+    try publicRoutes.register(collection: EchoRouteV1())
+
+    // /plans/* is admin-only. Node's guard also answered 401/403 for *unmatched*
+    // paths under /plans; Vapor skips group middleware when no route matches, so
+    // a guarded catch-all reproduces that (admins get the normal 404).
+    // TODO(S05): replace the `GET /plans` stub with ListPlans; keep the catch-all.
+    try admin.register(collection: PlansGuardRouteV1())
+
+    // Items (sample module). Conservative: authenticated (was public); removed in S04.
     let itemController = ItemController(
         getItemQueryHandler: app.deps.getItemQueryHandler,
         listItemsQueryHandler: app.deps.listItemsQueryHandler,
         createItemCommandHandler: app.deps.createItemCommandHandler,
         updateItemCommandHandler: app.deps.updateItemCommandHandler
     )
-    try api.register(collection: ItemRouteV1(controller: itemController))
+    try authenticated.register(collection: ItemRouteV1(controller: itemController))
 
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
@@ -37,6 +50,7 @@ func routes(_ app: Application) throws {
         getUserQueryHandler: app.deps.getUserQueryHandler,
         findUserQueryHandler: app.deps.findUserQueryHandler
     )
-    try api.register(collection: UserRouteV1(controller: userController))
+    // Conservative: authenticated (was public).
+    try authenticated.register(collection: UserRouteV1(controller: userController))
     // USER_LIFECYCLE_END
 }
