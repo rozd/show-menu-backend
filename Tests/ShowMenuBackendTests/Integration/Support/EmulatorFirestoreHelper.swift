@@ -14,7 +14,7 @@ import GRPCNIOTransportHTTP2
 ///     @Test(.enabled(if: EmulatorFirestoreHelper.isAvailable))
 ///     func myTest() async throws {
 ///         let firestore = try EmulatorFirestoreHelper.makeFirestore()
-///         let ds = FirestoreItemDataSource(transaction: .direct(firestore: firestore), prefix: "", logger: logger)
+///         let ds = FirestoreFeatureDataSource(transaction: .direct(firestore: firestore), prefix: "", logger: logger)
 ///         // ...
 ///     }
 /// }

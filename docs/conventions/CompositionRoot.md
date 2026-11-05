@@ -52,9 +52,9 @@ Every property is a computed `var` that delegates to the shared cache, keyed by 
 **own** keypath:
 
 ```swift
-var itemMapper: ItemMapper {
-    resolver.resolve(\.itemMapper) {
-        ItemMapper()
+var featureMapper: FeatureMapper {
+    resolver.resolve(\.featureMapper) {
+        FeatureMapper()
     }
 }
 ```
@@ -69,7 +69,7 @@ Command handlers get `unitOfWork` instead.
 ## Store bindings
 
 - The `transaction as! FirestoreTransaction` cast and the concrete
-  `Firestore<Entity>DataSource` (e.g. `FirestoreItemDataSource`) live **only** in the
+  `Firestore<Entity>DataSource` (e.g. `FirestoreFeatureDataSource`) live **only** in the
   module's data source factories — that is the one place per module allowed to name an
   adapter type. Repositories, use cases and handlers are written against the ports.
 - The core cross-cutting store factories (`idempotencyStoreFactory`, `inboxStoreFactory`)
