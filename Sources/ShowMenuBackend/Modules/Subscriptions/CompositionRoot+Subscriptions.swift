@@ -93,4 +93,58 @@ extension Application.CompositionRoot {
             )
         }
     }
+
+    // MARK: Subscriptions — Expiration job (S15)
+
+    var expiringSubscriptionSource: any ExpiringSubscriptionSource {
+        resolver.resolve(\.expiringSubscriptionSource) {
+            FirestoreExpiringSubscriptionSource(directTransaction: { [firestore] in .direct(firestore: firestore) })
+        }
+    }
+
+    var paidInvoiceSource: any PaidInvoiceSource {
+        resolver.resolve(\.paidInvoiceSource) {
+            FirestorePaidInvoiceSource(
+                dataSourceFactory: invoiceDataSourceFactory,
+                directTransaction: { [firestore] in FirestoreTransaction.direct(firestore: firestore) }
+            )
+        }
+    }
+
+    var expireSubscriptionUseCaseFactory: UseCaseFactory<ExpireSubscriptionUseCase> {
+        resolver.resolve(\.expireSubscriptionUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                ExpireSubscriptionUseCase(
+                    context: ctx, subscriptionRepositoryFactory: subscriptionRepositoryFactory, logger: logger
+                )
+            }
+        }
+    }
+
+    var reconcileSubscriptionUseCaseFactory: UseCaseFactory<ReconcileSubscriptionUseCase> {
+        resolver.resolve(\.reconcileSubscriptionUseCaseFactory) {
+            { [logger = app.logger, activate = activateSubscriptionUseCaseFactory] ctx in
+                ReconcileSubscriptionUseCase(
+                    context: ctx,
+                    invoiceRepositoryFactory: invoiceRepositoryFactory,
+                    subscriptionRepositoryFactory: subscriptionRepositoryFactory,
+                    activate: activate(ctx),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var checkExpiredSubscriptionsJob: CheckExpiredSubscriptionsJob {
+        resolver.resolve(\.checkExpiredSubscriptionsJob) {
+            CheckExpiredSubscriptionsJob(
+                unitOfWork: unitOfWork,
+                subscriptions: expiringSubscriptionSource,
+                invoices: paidInvoiceSource,
+                expireUseCaseFactory: expireSubscriptionUseCaseFactory,
+                reconcileUseCaseFactory: reconcileSubscriptionUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
 }

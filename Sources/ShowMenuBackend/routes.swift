@@ -72,6 +72,13 @@ func routes(_ app: Application) throws {
     )
     try publicRoutes.register(collection: PaymentCallbackRouteV1(controller: paymentCallbackController))
 
+    // Subscriptions: the daily Cloud Scheduler job (expire + reconcile). Not a user route:
+    // guarded by Google OIDC / `X-Api-Key` (bypassed only in emulator mode).
+    let subscriptionJobController = SubscriptionJobController(job: app.deps.checkExpiredSubscriptionsJob)
+    try api.grouped(app.schedulerAuthMiddleware).register(
+        collection: SubscriptionJobRouteV1(controller: subscriptionJobController)
+    )
+
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
     let userController = UserController(
