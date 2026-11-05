@@ -50,6 +50,7 @@ struct EventarcAuthMiddlewareTests {
         iss: String = "https://accounts.google.com",
         aud: String = audience,
         email: String? = forwarder,
+        emailVerified: Bool? = true,
         expiresIn: TimeInterval = 3600
     ) -> GoogleOIDCToken {
         GoogleOIDCToken(
@@ -57,7 +58,7 @@ struct EventarcAuthMiddlewareTests {
             aud: .init(value: aud),
             exp: .init(value: Date().addingTimeInterval(expiresIn)),
             email: email,
-            emailVerified: true
+            emailVerified: emailVerified
         )
     }
 
@@ -186,6 +187,15 @@ struct EventarcAuthMiddlewareTests {
         let key = try TestKey(kid: "k1")
         try await withApp(Self.middleware(trusting: key, allowedEmails: ["only@x.iam.gserviceaccount.com"])) { app in
             let status = try await post(app, signedBy: key)
+            #expect(status == .unauthorized)
+        }
+    }
+
+    @Test("an allow-listed email that Google marks unverified is 401")
+    func allowListedButUnverified() async throws {
+        let key = try TestKey(kid: "k1")
+        try await withApp(Self.middleware(trusting: key, allowedEmails: [Self.forwarder])) { app in
+            let status = try await post(app, signedBy: key, Self.claims(emailVerified: false))
             #expect(status == .unauthorized)
         }
     }

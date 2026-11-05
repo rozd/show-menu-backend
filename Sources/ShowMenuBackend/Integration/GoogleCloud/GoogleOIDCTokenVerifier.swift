@@ -106,7 +106,8 @@ actor GoogleOIDCTokenVerifier {
         try payload.aud.verifyIntendedAudience(includes: audience)
 
         if !allowedEmails.isEmpty {
-            guard let email = payload.email, allowedEmails.contains(email) else {
+            // The allow-list keys on `email`, so the email must be one Google vouches for.
+            guard let email = payload.email, payload.emailVerified != false, allowedEmails.contains(email) else {
                 throw GoogleOIDCError.serviceAccountNotAllowed(payload.email ?? "nil")
             }
         }
