@@ -24,7 +24,7 @@ public func configure(_ app: Application) async throws {
     //
     // Being global, header *validation* applies to every route, not just the
     // mutating ones that consume the key: a malformed `Idempotency-Key` (empty or
-    // > 255 chars) on any request — including a read like `GET /v1/items` — is
+    // > 255 chars) on any request — including a read like `GET /api/v1/items` — is
     // rejected with `400 Bad Request`. That is intentional (a malformed header is
     // a client error regardless of method); read endpoints are not exempt.
     app.middleware.use(IdempotencyKeyMiddleware())

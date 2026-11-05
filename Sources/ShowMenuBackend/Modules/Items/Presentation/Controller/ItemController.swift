@@ -36,7 +36,7 @@ struct ItemController: Sendable {
         }
     }
 
-    /// `GET /v1/items?limit=&offset=`.
+    /// `GET /api/v1/items?limit=&offset=`.
     ///
     /// Page bounds are clamped rather than rejected: `limit` is the server's
     /// protection against an unbounded scan, not a contract the client can fail.

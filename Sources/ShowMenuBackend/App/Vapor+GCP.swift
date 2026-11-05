@@ -164,9 +164,18 @@ extension GoogleCloudPlatform.Configuration {
             gcpEnvironment = .standalone(try loadServiceAccountKey(from: environment))
         }
 
+        // The service URL is only needed for Cloud Tasks / OIDC audiences; in the
+        // emulator it defaults to the local listener so boot never requires it.
+        let serviceURL: String
+        if gcpEnvironment.isEmulator, environment["GCP_CLOUD_RUN_SERVICE_URL"] == nil {
+            serviceURL = "http://localhost:\(environment["PORT"] ?? "8080")"
+        } else {
+            serviceURL = try Vapor.Environment.gcpThisServiceURL(in: environment)
+        }
+
         return .init(
             projectID: try Vapor.Environment.gcpProjectId(in: environment),
-            thisServiceURL: try Vapor.Environment.gcpThisServiceURL(in: environment),
+            thisServiceURL: serviceURL,
             environment: gcpEnvironment
         )
     }
@@ -312,7 +321,7 @@ extension GoogleCloudPlatform {
             case .missingProjectID:
                 return "GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable is required"
             case .missingServiceURL:
-                return "GCP_SERVICE_URL environment variable is required"
+                return "GCP_CLOUD_RUN_SERVICE_URL environment variable is required (optional only in the Firebase emulator environment)"
             case .missingServiceAccount:
                 return "GCP_SERVICE_ACCOUNT_EMAIL environment variable is required for local development"
             case .missingCredentials:
@@ -537,5 +546,19 @@ extension Environment {
         let branch = buildBranchName
         let sha = buildShortSha
         return sha.isEmpty ? branch : "\(branch)-\(sha)"
+    }
+
+    /// Human-readable build info shared by `GET /version` and
+    /// `GET /api/v1/echo/version`: `v<version>+<build>, revision: <K_REVISION>`.
+    static var buildInfo: String {
+        buildInfo(in: ProcessInfo.processInfo.environment)
+    }
+
+    static func buildInfo(in environment: [String: String]) -> String {
+        let branch = environment["BUILD_BRANCH_NAME"] ?? "local"
+        let sha = environment["BUILD_SHORT_SHA"] ?? ""
+        let build = sha.isEmpty ? branch : "\(branch)-\(sha)"
+        let revision = environment["K_REVISION"] ?? "unknown"
+        return "v0.0.1+\(build), revision: \(revision)"
     }
 }

@@ -7,7 +7,7 @@ func routes(_ app: Application) throws {
     }
 
     app.get("version") { req async -> String in
-        return "0.0.1"
+        Environment.buildInfo
     }
 
     // USER_LIFECYCLE_BEGIN
@@ -16,6 +16,12 @@ func routes(_ app: Application) throws {
     try app.register(collection: EventarcWebhookController())
     // USER_LIFECYCLE_END
 
+    // All module routes live under `/api` (D3); `/health`, `/version` and
+    // `POST /` stay at the root. Each RouteCollection adds its own `v1` segment.
+    let api = app.grouped("api")
+
+    try api.register(collection: EchoRouteV1())
+
     // Items (sample module)
     let itemController = ItemController(
         getItemQueryHandler: app.deps.getItemQueryHandler,
@@ -23,7 +29,7 @@ func routes(_ app: Application) throws {
         createItemCommandHandler: app.deps.createItemCommandHandler,
         updateItemCommandHandler: app.deps.updateItemCommandHandler
     )
-    try app.register(collection: ItemRouteV1(controller: itemController))
+    try api.register(collection: ItemRouteV1(controller: itemController))
 
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
@@ -31,6 +37,6 @@ func routes(_ app: Application) throws {
         getUserQueryHandler: app.deps.getUserQueryHandler,
         findUserQueryHandler: app.deps.findUserQueryHandler
     )
-    try app.register(collection: UserRouteV1(controller: userController))
+    try api.register(collection: UserRouteV1(controller: userController))
     // USER_LIFECYCLE_END
 }

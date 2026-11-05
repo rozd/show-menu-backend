@@ -4,7 +4,7 @@ import Logging
 import Vapor
 @testable import ShowMenuBackend
 
-/// HTTP-edge tests for the ETag / If-Match layer on `PUT /v1/items/:id`,
+/// HTTP-edge tests for the ETag / If-Match layer on `PUT /api/v1/items/:id`,
 /// driving the real `ItemController` against an in-memory versioned store.
 @Suite("Item Update — ETag / If-Match")
 struct ItemUpdateControllerTests {
@@ -55,7 +55,7 @@ struct ItemUpdateControllerTests {
         var headers: HTTPHeaders = ["Content-Type": "application/json"]
         if let ifMatch { headers.replaceOrAdd(name: .ifMatch, value: ifMatch) }
         let req = Request(
-            application: app, method: .PUT, url: "/v1/items/i1",
+            application: app, method: .PUT, url: "/api/v1/items/i1",
             headers: headers, collectedBody: body, on: app.eventLoopGroup.any()
         )
         req.parameters.set("itemId", to: "i1")

@@ -1,5 +1,5 @@
 {
-  "originHash" : "3fba64c6b8029b670648e978a6e3cc1a4b233e40998d027342fbe0c9fece1544",
+  "originHash" : "6809e922985592e742a658d3dc6d7bae8aa4434ffd25f6137e77cccb42873a6b",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -33,7 +33,6 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Rsych/FirebaseAPI.git",
       "state" : {
-        "branch" : "main",
         "revision" : "c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a"
       }
     },

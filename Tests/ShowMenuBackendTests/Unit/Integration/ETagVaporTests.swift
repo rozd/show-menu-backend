@@ -32,15 +32,15 @@ struct ETagVaporTests {
     func ifMatchWildcard() async throws {
         let app = try await Application.make(.testing)
 
-        let starReq = Request(application: app, method: .PUT, url: "/v1/items/i1",
+        let starReq = Request(application: app, method: .PUT, url: "/api/v1/items/i1",
                               headers: ["If-Match": "*"], on: app.eventLoopGroup.any())
         #expect(starReq.ifMatch == nil)
 
-        let versionReq = Request(application: app, method: .PUT, url: "/v1/items/i1",
+        let versionReq = Request(application: app, method: .PUT, url: "/api/v1/items/i1",
                                  headers: ["If-Match": "\"5\""], on: app.eventLoopGroup.any())
         #expect(versionReq.ifMatch == Version(5))
 
-        let noneReq = Request(application: app, method: .PUT, url: "/v1/items/i1",
+        let noneReq = Request(application: app, method: .PUT, url: "/api/v1/items/i1",
                               on: app.eventLoopGroup.any())
         #expect(noneReq.ifMatch == nil)
 
