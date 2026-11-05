@@ -64,6 +64,14 @@ func routes(_ app: Application) throws {
     )
     try authenticated.register(collection: PurchaseRouteV1(controller: purchaseController))
 
+    // Payments: the LiqPay `server_url` callback. PUBLIC (LiqPay sends no token): the
+    // signature verified by the payment gateway is the authentication.
+    let paymentCallbackController = PaymentCallbackController(
+        gateway: app.deps.paymentGateway,
+        handler: app.deps.handleLiqPayCallbackCommandHandler
+    )
+    try publicRoutes.register(collection: PaymentCallbackRouteV1(controller: paymentCallbackController))
+
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
     let userController = UserController(

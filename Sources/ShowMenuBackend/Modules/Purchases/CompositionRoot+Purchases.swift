@@ -193,6 +193,45 @@ extension Application.CompositionRoot {
         }
     }
 
+    var invoiceStatusAuditStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any InvoiceStatusAuditStore {
+        resolver.resolve(\.invoiceStatusAuditStoreFactory) {
+            { [logger = app.logger] ctx in
+                FirestoreInvoiceStatusAuditStore(
+                    transaction: ctx.transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(""),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var handleLiqPayCallbackUseCaseFactory: UseCaseFactory<HandleLiqPayCallbackUseCase> {
+        resolver.resolve(\.handleLiqPayCallbackUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                HandleLiqPayCallbackUseCase(
+                    context: ctx,
+                    orderRepositoryFactory: orderRepositoryFactory,
+                    invoiceRepositoryFactory: invoiceRepositoryFactory,
+                    sessionDataSourceFactory: checkoutSessionDataSourceFactory,
+                    sessionMapper: checkoutSessionMapper,
+                    auditStoreFactory: invoiceStatusAuditStoreFactory,
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var handleLiqPayCallbackCommandHandler: HandleLiqPayCallbackCommandHandler {
+        resolver.resolve(\.handleLiqPayCallbackCommandHandler) {
+            HandleLiqPayCallbackCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: handleLiqPayCallbackUseCaseFactory,
+                inbox: InboxComponents(storeFactory: inboxStoreFactory),
+                logger: app.logger
+            )
+        }
+    }
+
     // MARK: Purchases — Payment Gateway
 
     var paymentGateway: any PaymentGateway {
