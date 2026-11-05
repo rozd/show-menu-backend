@@ -361,7 +361,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **Done:** both repos build and test green; the harness passes against Vapor with no Node code left.
 
 ## 6. Progress checklist
-- [ ] S01 Local loop / `/api` / Echo / CI
+- [x] S01 Local loop / `/api` / Echo / CI
 - [ ] S02 Error contract and shared kernel
 - [ ] S03 Authentication and admin guard
 - [ ] S04 Catalog: Features (+ remove Items)
@@ -387,7 +387,17 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - Cancel of a non-pending invoice: 409, or idempotent 200? (S12)
 - Confirm the LiqPay callback with the status API? (S13)
 - FirebaseAPI collection-group support. (S15)
-- `firebase emulators:start --config` support for the forwarders-only config. (S01)
+- ~~`firebase emulators:start --config` support for the forwarders-only config. (S01)~~ **Answered (S01): supported** (firebase-tools 15.31.0). `firebase emulators:start --config firebase.vapor.json --only auth,firestore,functions --project show-menu-dev`, run from `show-menu-firebase`, loads only the `forwarders` codebase (log: `Loaded functions definitions from source`, an empty codebase is fine). No fallback needed. `make emulators` wraps it (needs `cd ../show-menu-firebase`).
+
+### Decisions taken (S01)
+- **S01:** Local loop commands. `make emulators` (terminal 1), `make run-local` (terminal 2, `PORT=8080`, emulator env on 127.0.0.1), `make harness HARNESS_ARGS=smoke` (terminal 3). Equivalent: `npm --prefix ../show-menu-firebase/test-harness run test:vapor:local -- <pattern>`.
+- **S01:** `forwarders/` needs `npm install && npm run build` once (and after edits; `lib/` is gitignored) before the emulators load it. The functions emulator warns about Node 20 vs the host Node; harmless.
+- **S01:** `GCP_CLOUD_RUN_SERVICE_URL` is optional only in emulator mode (defaults to `http://localhost:$PORT`, 8080). Everywhere else it is still required, and the error now names the right variable.
+- **S01:** Route modules keep their own `v1` segment and are registered on `app.grouped("api")` in `routes.swift`. Later modules must register on `api`, not `app`. Idempotency header validation is still global.
+- **S01:** `GET /version` and `GET /api/v1/echo/version` share `Environment.buildInfo`: `v0.0.1+<BUILD_BRANCH_NAME>[-<BUILD_SHORT_SHA>], revision: <K_REVISION|unknown>`. The `0.0.1` is hardcoded (Node read `version.json`).
+- **S01:** FirebaseAPI pinned to revision `c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a` (the previously resolved `main`).
+- **S01:** `firebase.vapor.json` omits hosting/storage/remoteconfig/extensions on purpose (no LiqPay extension in the Vapor loop). It does include firestore rules + indexes.
+- **S01:** CI runs in a `swift:6.2-noble` container on ubuntu-latest (not yet run on GitHub).
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.

@@ -75,6 +75,36 @@ struct GoogleCloudPlatformConfigurationTests {
         #expect(provider is EmulatorAuthProvider)
     }
 
+    @Test("emulator mode does not require GCP_CLOUD_RUN_SERVICE_URL; defaults to the local PORT")
+    func emulatorServiceURLOptional() throws {
+        let emulatorVars = [
+            "GCP_PROJECT_ID": "demo-project",
+            "FIRESTORE_EMULATOR_HOST": "localhost:9002",
+            "FIREBASE_AUTH_EMULATOR_HOST": "localhost:9099",
+        ]
+        let defaulted = try Configuration.fromEnvironment(environment: emulatorVars)
+        #expect(defaulted.thisServiceURL == "http://localhost:8080")
+
+        let withPort = try Configuration.fromEnvironment(
+            environment: emulatorVars.merging(["PORT": "9191"]) { _, new in new }
+        )
+        #expect(withPort.thisServiceURL == "http://localhost:9191")
+    }
+
+    @Test("outside the emulator a missing GCP_CLOUD_RUN_SERVICE_URL still throws, naming the right variable")
+    func serviceURLRequiredOutsideEmulator() {
+        let error = #expect(throws: ConfigurationError.self) {
+            try Configuration.fromEnvironment(environment: [
+                "GCP_PROJECT_ID": "demo-project", "K_SERVICE": "svc",
+            ])
+        }
+        guard case .missingServiceURL = error else {
+            Issue.record("expected .missingServiceURL, got \(String(describing: error))")
+            return
+        }
+        #expect(error?.errorDescription?.contains("GCP_CLOUD_RUN_SERVICE_URL") == true)
+    }
+
     @Test("emulator wins over K_SERVICE when both emulator vars are set")
     func emulatorWinsOverCloudRun() throws {
         let config = try Configuration.fromEnvironment(environment: env([

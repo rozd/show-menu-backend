@@ -4,7 +4,7 @@ import Logging
 import Vapor
 @testable import ShowMenuBackend
 
-/// Edge clamping of `GET /v1/items?limit=&offset=` through the real controller.
+/// Edge clamping of `GET /api/v1/items?limit=&offset=` through the real controller.
 @Suite("Item List — paging clamp")
 struct ItemListControllerTests {
 
@@ -46,13 +46,13 @@ struct ItemListControllerTests {
     }
 
     @Test("clamps limit/offset", arguments: [
-        ("/v1/items", 20, 0),
-        ("/v1/items?limit=0", 1, 0),
-        ("/v1/items?limit=-3", 1, 0),
-        ("/v1/items?limit=500", 100, 0),
-        ("/v1/items?offset=-5", 20, 0),
-        ("/v1/items?limit=0&offset=-5", 1, 0),
-        ("/v1/items?limit=7&offset=3", 7, 3),
+        ("/api/v1/items", 20, 0),
+        ("/api/v1/items?limit=0", 1, 0),
+        ("/api/v1/items?limit=-3", 1, 0),
+        ("/api/v1/items?limit=500", 100, 0),
+        ("/api/v1/items?offset=-5", 20, 0),
+        ("/api/v1/items?limit=0&offset=-5", 1, 0),
+        ("/api/v1/items?limit=7&offset=3", 7, 3),
     ])
     func clamps(url: String, expectedLimit: Int, expectedOffset: Int) async throws {
         let app = try await Application.make(.testing)

@@ -16,7 +16,8 @@ let package = Package(
         // 🔐 Cross-platform cryptography for JWT signing (works on macOS and Linux)
         .package(url: "https://github.com/apple/swift-crypto.git", from: "4.2.0"),
         // 🔥 Firebase API - gRPC-based Firestore client
-        .package(url: "https://github.com/Rsych/FirebaseAPI.git", branch: "main"),
+        //    Pinned to a revision (was `branch: main`); bump deliberately.
+        .package(url: "https://github.com/Rsych/FirebaseAPI.git", revision: "c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a"),
         // 📡 gRPC Swift NIO Transport - HTTP/2 transport for FirebaseAPI
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", from: "2.0.0"),
         // 🔑 Google Auth - Application Default Credentials and OAuth2 access tokens for GCP APIs
