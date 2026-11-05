@@ -29,27 +29,11 @@ struct FirebaseJWKSUnavailableError: Error, AbortError, CustomStringConvertible 
 actor FirebaseTokenVerifier {
 
     static let jwksURL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
-    static let minCacheAge: TimeInterval = 60
-    static let maxCacheAge: TimeInterval = 24 * 3600
-    /// How long stale keys are reused before retrying after a failed refresh.
-    static let staleRetryInterval: TimeInterval = 60
 
     private let projectID: String
     private let acceptsUnsignedTokens: Bool
-    private let fetcher: JWKSFetcher
+    private let jwks: JWKSKeyCache
     private let now: @Sendable () -> Date
-    private let logger: Logger
-
-    /// A fetched JWKS: the verifier collection plus the key ids it contains
-    /// (jwt-kit falls back to a default signer on an unknown `kid`; we don't).
-    private struct KeySet: Sendable {
-        let collection: JWTKeyCollection
-        let kids: Set<String>
-    }
-
-    private var keys: KeySet?
-    private var keysExpireAt: Date = .distantPast
-    private var inflight: Task<KeySet, any Error>?
 
     init(
         projectID: String,
@@ -60,9 +44,8 @@ actor FirebaseTokenVerifier {
     ) {
         self.projectID = projectID
         self.acceptsUnsignedTokens = acceptsUnsignedTokens
-        self.fetcher = fetcher
+        self.jwks = JWKSKeyCache(name: "Firebase", fetcher: fetcher, now: now, logger: logger)
         self.now = now
-        self.logger = logger
     }
 
     /// Production wiring: fetch Google's JWKS through the Vapor client.
@@ -75,16 +58,7 @@ actor FirebaseTokenVerifier {
         self.init(
             projectID: projectID,
             acceptsUnsignedTokens: acceptsUnsignedTokens,
-            fetcher: {
-                let response = try await client.get(URI(string: FirebaseTokenVerifier.jwksURL))
-                guard (200..<300).contains(Int(response.status.code)) else {
-                    throw FirebaseJWKSUnavailableError(underlying: "HTTP \(response.status.code)")
-                }
-                guard var body = response.body, let data = body.readData(length: body.readableBytes) else {
-                    throw FirebaseJWKSUnavailableError(underlying: "empty body")
-                }
-                return (data, response.headers)
-            },
+            fetcher: JWKSKeyCache.clientFetcher(client: client, url: FirebaseTokenVerifier.jwksURL),
             logger: logger
         )
     }
@@ -96,7 +70,7 @@ actor FirebaseTokenVerifier {
             try payload.exp.verifyNotExpired()
         } else {
             let kid = try Self.requireRS256WithKid(token)
-            let keySet = try await keyCollection()
+            let keySet = try await jwks.keySet()
             guard keySet.kids.contains(kid) else {
                 throw FirebaseAuthError.unknownKeyID(kid)
             }
@@ -106,64 +80,9 @@ actor FirebaseTokenVerifier {
         return payload
     }
 
-    // MARK: - JWKS
-
-    private func keyCollection() async throws -> KeySet {
-        if let keys, keysExpireAt > now() {
-            return keys
-        }
-        // Coalesce: every concurrent caller awaits the same refresh.
-        if let inflight {
-            return try await inflight.value
-        }
-        let task = Task { try await self.refreshKeys() }
-        inflight = task
-        return try await task.value
-    }
-
-    /// Runs on the actor; always clears `inflight`. On failure, serves the stale
-    /// collection when there is one (and delays the next attempt).
-    private func refreshKeys() async throws -> KeySet {
-        defer { inflight = nil }
-        do {
-            logger.info("Fetching Firebase JWKS")
-            let (data, headers) = try await fetcher()
-            let jwks: JWKS
-            do {
-                jwks = try JSONDecoder().decode(JWKS.self, from: data)
-            } catch {
-                throw FirebaseJWKSUnavailableError(underlying: "undecodable JWKS: \(error)")
-            }
-            let collection = JWTKeyCollection()
-            try await collection.add(jwks: jwks)
-            let keySet = KeySet(collection: collection, kids: Set(jwks.keys.compactMap { $0.keyIdentifier?.string }))
-            keys = keySet
-            keysExpireAt = now() + Self.maxAge(from: headers)
-            return keySet
-        } catch {
-            if let stale = keys {
-                logger.warning("JWKS refresh failed, serving stale keys", metadata: [
-                    "error": .string(String(describing: error))
-                ])
-                keysExpireAt = now() + Self.staleRetryInterval
-                return stale
-            }
-            if error is FirebaseJWKSUnavailableError { throw error }
-            throw FirebaseJWKSUnavailableError(underlying: String(describing: error))
-        }
-    }
-
-    /// Cache lifetime from the JWKS response's Cache-Control, default 1 hour,
-    /// clamped to [`minCacheAge`, `maxCacheAge`].
+    /// Cache lifetime from the JWKS response's Cache-Control (see `JWKSKeyCache`).
     static func maxAge(from headers: HTTPHeaders) -> TimeInterval {
-        guard
-            let cacheControl = headers.first(name: .cacheControl),
-            let match = cacheControl.firstMatch(of: /max-age=(\d+)/),
-            let seconds = TimeInterval(match.1)
-        else {
-            return 3600
-        }
-        return min(max(seconds, minCacheAge), maxCacheAge)
+        JWKSKeyCache.maxAge(from: headers)
     }
 
     // MARK: - Token shape

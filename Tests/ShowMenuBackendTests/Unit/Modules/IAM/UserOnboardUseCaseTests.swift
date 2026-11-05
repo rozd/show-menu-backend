@@ -47,14 +47,19 @@ struct UserOnboardUseCaseTests {
         try await useCase.execute(params: .init(
             userId: User.Id(rawValue: "u-1"),
             email: "alice@example.com",
-            displayName: "Alice"
+            name: "Alice",
+            avatarURL: "https://example.com/a.png"
         ))
 
         let inserted = await ds.insertedModels
         #expect(inserted.count == 1)
         #expect(inserted.first?.id == "u-1")
         #expect(inserted.first?.email == "alice@example.com")
-        #expect(inserted.first?.displayName == "Alice")
+        #expect(inserted.first?.name == "Alice")
+        #expect(inserted.first?.avatarURL == "https://example.com/a.png")
+        #expect(inserted.first?.accounts == [])
+        #expect(inserted.first?.createdAt != nil)
+        #expect(inserted.first?.updatedAt == inserted.first?.createdAt)
 
         let events = await collector.drain()
         #expect(events.count == 1)
@@ -77,7 +82,8 @@ struct UserOnboardUseCaseTests {
         try await useCase.execute(params: .init(
             userId: User.Id(rawValue: "u-existing"),
             email: "different@example.com",
-            displayName: "Different"
+            name: "Different",
+            avatarURL: nil
         ))
 
         let inserted = await ds.insertedModels
@@ -100,7 +106,8 @@ struct UserOnboardUseCaseTests {
             try await useCase.execute(params: .init(
                 userId: User.Id(rawValue: ""),
                 email: nil,
-                displayName: nil
+                name: nil,
+                avatarURL: nil
             ))
         }
     }

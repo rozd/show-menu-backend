@@ -5,6 +5,7 @@ struct CreateUserAccountCommand: Command {
         let userId: String
         let email: String?
         let displayName: String?
+        let photoURL: String?
     }
 
     let payload: Payload

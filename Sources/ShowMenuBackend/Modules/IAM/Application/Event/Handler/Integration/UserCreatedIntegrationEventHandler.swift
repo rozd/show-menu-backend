@@ -23,7 +23,8 @@ struct UserCreatedIntegrationEventHandler: IntegrationEventHandler {
             payload: .init(
                 userId: event.userId,
                 email: event.email,
-                displayName: event.displayName
+                displayName: event.displayName,
+                photoURL: event.photoURL
             ),
             metadata: CommandMetadata(
                 correlationId: event.metadata.correlationId ?? TraceID()

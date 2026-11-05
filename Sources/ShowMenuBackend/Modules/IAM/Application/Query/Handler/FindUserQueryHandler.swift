@@ -19,7 +19,7 @@ struct FindUserQueryHandler: QueryHandler {
 
         var filters: [DataSourceFilter] = []
         if let displayName = query.displayName {
-            filters.append(DataSourceFilter(field: "displayName", op: .equal, value: displayName))
+            filters.append(DataSourceFilter(field: "name", op: .equal, value: displayName))
         }
         if let email = query.email {
             filters.append(DataSourceFilter(field: "email", op: .equal, value: email))

@@ -5,7 +5,8 @@ struct UserOnboardUseCase: UseCase {
     struct Params: Sendable {
         let userId: User.Id
         let email: String?
-        let displayName: String?
+        let name: String?
+        let avatarURL: String?
     }
 
     let context: any UnitOfWorkContext
@@ -28,13 +29,13 @@ struct UserOnboardUseCase: UseCase {
             return
         }
 
+        // Every Auth user gets a profile document, admins included (Node skipped
+        // them, which broke purchases for admins).
         let user = User(
             id: params.userId,
             email: params.email,
-            displayName: params.displayName,
-            photoURL: nil,
-            emailVerified: false,
-            disabled: false,
+            name: params.name,
+            avatarURL: params.avatarURL,
             createdAt: .now
         )
 
