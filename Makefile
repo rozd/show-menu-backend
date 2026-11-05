@@ -8,7 +8,7 @@ FIREBASE_DIR ?= ../show-menu-firebase
 FIREBASE_PROJECT ?= show-menu-dev
 HARNESS_ARGS ?=
 
-.PHONY: build test emulators run-local harness
+.PHONY: build test forwarders emulators run-local harness
 
 build:
 	swift build
@@ -18,7 +18,12 @@ test:
 
 # `--config` is supported by firebase-tools 15.x (verified in S01; see roadmap §7).
 # Runs from the firebase repo because the config's relative paths resolve there.
-emulators:
+# The functions emulator loads forwarders/lib, which is gitignored: build it first.
+forwarders:
+	npm --prefix $(FIREBASE_DIR)/forwarders install --no-audit --no-fund
+	npm --prefix $(FIREBASE_DIR)/forwarders run build
+
+emulators: forwarders
 	cd $(FIREBASE_DIR) && firebase emulators:start --config firebase.vapor.json --only auth,firestore,functions --project $(FIREBASE_PROJECT)
 
 run-local:
