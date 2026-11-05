@@ -12,7 +12,8 @@ extension CommandMetadata {
     init(req: Request) {
         self.init(
             correlationId: TraceID(stringLiteral: req.id),
-            userId: nil,
+            // Bound by `FirebaseAuthMiddleware`; nil on public routes.
+            userId: RequestContext.principal?.id,
             timestamp: .now
         )
     }
