@@ -83,7 +83,7 @@ The function formats requests to match the backend's `EventarcWebhookController`
 
 | Variable | Required | Description |
 |---|---|---|
-| `BACKEND_URL` | Yes | Full URL of the Cloud Run backend (e.g., `https://my-backend-xxxxx.run.app`) |
+| `BACKEND_URL` | Yes | Full URL of the Cloud Run backend (e.g., `https://show-menu-backend-xxxxx.run.app`) |
 | `GCP_PROJECT` | No | GCP project ID. Falls back to `GCLOUD_PROJECT` which is auto-set by the Cloud Functions runtime. |
 
 #### Authentication
@@ -106,8 +106,8 @@ Each deployed environment is a **separate GCP project** with its own Cloud Run s
 
 | Environment | GCP Project | Region | Cloud Run Service |
 |---|---|---|---|
-| **Production** | `your-project-id` | `us-central1` | `my-backend` |
-| **Staging** | `your-project-id-staging` | `us-central1` | `my-backend` |
+| **Production** | `show-menu-dev` | `us-central1` | `show-menu-backend` |
+| **Staging** | `show-menu-dev-staging` | `us-central1` | `show-menu-backend` |
 
 Add rows for additional environments (development, QA, etc.) as needed. The deploy and IAM steps below are run once per environment by changing the exported variables.
 
@@ -117,14 +117,14 @@ Set the variables for the target environment, then deploy both functions from th
 
 ```bash
 # Production
-export PROJECT_ID=your-project-id
+export PROJECT_ID=show-menu-dev
 export REGION=us-central1
-export SERVICE_NAME=my-backend
+export SERVICE_NAME=show-menu-backend
 
 # Staging — uncomment for staging deploys
-# export PROJECT_ID=your-project-id-staging
+# export PROJECT_ID=show-menu-dev-staging
 # export REGION=us-central1
-# export SERVICE_NAME=my-backend
+# export SERVICE_NAME=show-menu-backend
 
 export BACKEND_URL=$(gcloud run services describe $SERVICE_NAME \
   --project=$PROJECT_ID \

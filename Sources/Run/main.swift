@@ -1,3 +1,3 @@
-import VaporFirebaseBackendApp
+import ShowMenuBackend
 
-try await VaporFirebaseBackendApp.main()
+try await ShowMenuBackend.main()

@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "VaporFirebaseBackendApp",
+    name: "ShowMenuBackend",
     platforms: [
        .macOS(.v15)
     ],
@@ -24,7 +24,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "VaporFirebaseBackendApp",
+            name: "ShowMenuBackend",
             dependencies: [
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "Queues", package: "queues"),
@@ -51,14 +51,14 @@ let package = Package(
         .executableTarget(
             name: "Run",
             dependencies: [
-                .target(name: "VaporFirebaseBackendApp"),
+                .target(name: "ShowMenuBackend"),
             ],
             swiftSettings: swiftSettings
         ),
         .testTarget(
-            name: "VaporFirebaseBackendAppTests",
+            name: "ShowMenuBackendTests",
             dependencies: [
-                .target(name: "VaporFirebaseBackendApp"),
+                .target(name: "ShowMenuBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
                 .product(name: "GoogleAuth", package: "swift-google-auth"),
             ],

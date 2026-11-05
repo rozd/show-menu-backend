@@ -25,7 +25,7 @@ swift test --filter CreateItemUseCaseTests
 swift test --filter "createItem happy path"
 
 # Docker build
-docker build -t vapor-firebase-backend .
+docker build -t show-menu-backend .
 docker compose up app
 ```
 
@@ -41,7 +41,7 @@ firebase emulators:start  # in a separate terminal
 
 For real GCP project:
 ```bash
-export GCP_PROJECT_ID=your-project-id
+export GCP_PROJECT_ID=show-menu-dev
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ```
 

@@ -11,7 +11,7 @@ You are scaffolding a new module for this Vapor/Firebase backend. The module nam
 
 ## Pre-flight
 
-1. Read `Package.swift` to find the executable target name (the `APP_NAME`, e.g. `VaporFirebaseBackendApp`).
+1. Read `Package.swift` to find the executable target name (the `APP_NAME`, e.g. `ShowMenuBackend`).
 2. Derive the singular entity name from the module name (e.g. `Items` → `Item`, `Orders` → `Order`). If the module name is already singular, use it as-is.
 3. Verify the module does not already exist by checking `Sources/{APP_NAME}/Modules/$ARGUMENTS/`.
 

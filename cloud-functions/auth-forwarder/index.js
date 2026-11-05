@@ -6,7 +6,7 @@
  * and POSTs to the Swift backend's webhook endpoint.
  *
  * Required env vars:
- *   BACKEND_URL  — Cloud Run service URL (e.g. https://my-backend-xxxxx.run.app)
+ *   BACKEND_URL  — Cloud Run service URL (e.g. https://show-menu-backend-xxxxx.run.app)
  *   GCP_PROJECT  — GCP project ID (auto-set by Cloud Functions runtime as GCLOUD_PROJECT)
  */
 

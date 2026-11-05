@@ -1,6 +1,6 @@
-# Vapor + Firebase Backend Template
+# ShowMenuBackend
 
-A production-ready template for building Swift/Vapor backends on Google Cloud Run with Firebase/Firestore. Implements **Domain-Driven Design (DDD)** with **CQRS** patterns and includes a complete sample module demonstrating all architectural layers.
+Swift Vapor backend for Show Menu, a digital restaurant menu product (QR menus, with LiqPay payments in the Firebase repo).
 
 ## Prerequisites
 
@@ -15,8 +15,8 @@ A production-ready template for building Swift/Vapor backends on Google Cloud Ru
 ### 1. Clone and configure
 
 ```bash
-git clone <this-repo> my-backend
-cd my-backend
+git clone <this-repo> show-menu-backend
+cd show-menu-backend
 ```
 
 ### 2. Set up environment
@@ -32,7 +32,7 @@ export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
 For local development with a real GCP project:
 
 ```bash
-export GCP_PROJECT_ID=your-project-id
+export GCP_PROJECT_ID=show-menu-dev
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ```
 
@@ -69,7 +69,7 @@ curl http://localhost:8080/v1/items # → []
 ## Architecture
 
 ```
-Sources/VaporFirebaseBackendApp/
+Sources/ShowMenuBackend/
 ├── entrypoint.swift          # Application entry point
 ├── configure.swift           # App configuration and GCP bootstrap
 ├── routes.swift              # Route registration
@@ -104,8 +104,8 @@ Tests use the Swift Testing framework with in-memory test doubles (no Firestore 
 ### Local Docker
 
 ```bash
-docker build -t my-backend .
-docker run -p 8080:8080 -e GCP_PROJECT_ID=your-project my-backend
+docker build -t show-menu-backend .
+docker run -p 8080:8080 -e GCP_PROJECT_ID=your-project show-menu-backend
 ```
 
 ### Deploying to Cloud Run
@@ -121,7 +121,7 @@ This section walks through deploying the backend to Google Cloud Run with automa
 #### Step 1 — Enable GCP APIs
 
 ```bash
-export PROJECT_ID=your-project-id
+export PROJECT_ID=show-menu-dev
 
 gcloud config set project $PROJECT_ID
 
@@ -138,9 +138,9 @@ Artifact Registry stores your Docker images. Create a repository in your preferr
 
 ```bash
 export REGION=us-central1
-export SERVICE_NAME=my-backend
+export SERVICE_NAME=show-menu-backend
 
-gcloud artifacts repositories create my-backend-repo \
+gcloud artifacts repositories create show-menu-backend-repo \
   --repository-format=docker \
   --location=$REGION \
   --description="Docker images for my backend"
@@ -194,8 +194,8 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 | Variable | Value | Example |
 |---|---|---|
 | `_REGION` | Your GCP region | `us-central1` |
-| `_REPOSITORY_NAME` | Artifact Registry repo name | `my-backend-repo` |
-| `_SERVICE_NAME` | Cloud Run service name | `my-backend` |
+| `_REPOSITORY_NAME` | Artifact Registry repo name | `show-menu-backend-repo` |
+| `_SERVICE_NAME` | Cloud Run service name | `show-menu-backend` |
 | `_TAG` | Image tag | `$SHORT_SHA` |
 
 > `$PROJECT_ID` and `$SHORT_SHA` are provided automatically by Cloud Build.
@@ -219,7 +219,7 @@ Trigger a build manually from your local machine:
 ```bash
 gcloud builds submit \
   --region=$REGION \
-  --substitutions=_REGION=$REGION,_REPOSITORY_NAME=my-backend-repo,_SERVICE_NAME=$SERVICE_NAME,_TAG=manual
+  --substitutions=_REGION=$REGION,_REPOSITORY_NAME=show-menu-backend-repo,_SERVICE_NAME=$SERVICE_NAME,_TAG=manual
 ```
 
 #### Step 7 — Verify

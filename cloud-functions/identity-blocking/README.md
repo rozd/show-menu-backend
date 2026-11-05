@@ -66,11 +66,11 @@ Deploy both functions as gen-2 HTTP functions from the repository root:
 
 ```bash
 # Production
-export PROJECT_ID=your-project-id
+export PROJECT_ID=show-menu-dev
 export REGION=us-central1
 
 # Staging — uncomment for staging deploys
-# export PROJECT_ID=your-project-id-staging
+# export PROJECT_ID=show-menu-dev-staging
 # export REGION=us-central1
 
 for fn in beforeCreated beforeSignedIn; do

@@ -32,7 +32,7 @@ RUN swift build -c release \
         --static-swift-stdlib \
         -Xlinker -ljemalloc && \
     # Copy main executable to staging area (rename to match ENTRYPOINT)
-    cp "$(swift build -c release --show-bin-path)/Run" /staging/VaporFirebaseBackendApp && \
+    cp "$(swift build -c release --show-bin-path)/Run" /staging/ShowMenuBackend && \
     # Copy resources bundled by SPM to staging area
     find -L "$(swift build -c release --show-bin-path)" -regex '.*\.resources$' -exec cp -Ra {} /staging \;
 
@@ -86,5 +86,5 @@ USER vapor:vapor
 EXPOSE 8080
 
 # Start the Vapor service when the image is run, default to listening on 8080 in production environment
-ENTRYPOINT ["./VaporFirebaseBackendApp"]
+ENTRYPOINT ["./ShowMenuBackend"]
 CMD ["serve", "--env", "production", "--hostname", "0.0.0.0"]

@@ -18,7 +18,7 @@ x-shared_environment: &shared_environment
 
 services:
   app:
-    image: vapor-firebase-backend:latest
+    image: show-menu-backend:latest
     build:
       context: .
     environment:
