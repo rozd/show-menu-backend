@@ -141,6 +141,31 @@ final class Subscription: AggregateRoot, @unchecked Sendable {
         return true
     }
 
+    /// The expiration job's decision for one subscription at `now` (Node `expireIfNeeded`):
+    ///
+    /// * not `active` -> ``ExpirationOutcome/unchanged``;
+    /// * `expiresAt <= now - 1 day` -> `active -> expired` (``ExpirationOutcome/expired``);
+    /// * `now - 1 day < expiresAt <= now` -> raises `subscription.expiring` and changes **no state**
+    ///   (``ExpirationOutcome/expiring``): the caller dispatches the event without persisting;
+    /// * `expiresAt > now` -> ``ExpirationOutcome/unchanged``.
+    ///
+    /// Both boundaries are inclusive. Throws nothing for a non-`active` subscription.
+    @discardableResult
+    func expireIfNeeded(now: Date = .now) throws -> ExpirationOutcome {
+        guard status == .active else { return .unchanged }
+        if expiresAt <= now.addingTimeInterval(-Subscription.expiryGrace) {
+            return try expire(now: now) ? .expired : .unchanged
+        }
+        if expiresAt <= now {
+            record(event: .semantic(.subscriptionExpiring, aggregateId: id, occurredAt: now))
+            return .expiring
+        }
+        return .unchanged
+    }
+
+    /// How long past `expiresAt` a subscription stays `active` before it expires (one day, as Node).
+    static let expiryGrace: TimeInterval = 86_400
+
     /// Checks the edge against the FSM without changing anything. `false` = already there.
     private func validatedMove(to target: SubscriptionStatus) throws -> Bool {
         guard status != target else { return false }
@@ -163,6 +188,11 @@ final class Subscription: AggregateRoot, @unchecked Sendable {
         .init(source: .active, target: .cancelled),
         .init(source: .suspended, target: .cancelled),
     ]
+}
+
+/// What ``Subscription/expireIfNeeded(now:)`` did.
+enum ExpirationOutcome: Sendable, Equatable {
+    case expired, expiring, unchanged
 }
 
 extension Subscription {

@@ -6,9 +6,9 @@ enum SubscriptionEventKind: String, LifecycleEventKind {
     case subscriptionUpdated = "updated"
     case subscriptionDeleted = "deleted"
 
-    // Semantic (domain facts): recorded by the aggregate. Node's `subscription.*` events
-    // (`expiring` arrives with the expiration job, S15).
+    // Semantic (domain facts): recorded by the aggregate. Node's `subscription.*` events.
     case subscriptionActivated = "subscription.activated"
+    case subscriptionExpiring = "subscription.expiring"
     case subscriptionExpired = "subscription.expired"
     case subscriptionSuspended = "subscription.suspended"
     case subscriptionCancelled = "subscription.cancelled"

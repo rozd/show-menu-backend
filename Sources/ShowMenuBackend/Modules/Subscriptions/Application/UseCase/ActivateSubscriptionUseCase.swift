@@ -28,6 +28,16 @@ struct ActivateSubscriptionUseCase: UseCase {
         let trigger: Trigger
     }
 
+    /// What the use case did (the event handler ignores it; the reconcile pass counts `created`).
+    enum Outcome: Sendable, Equatable {
+        /// A new subscription document was inserted.
+        case created
+        /// An existing subscription was extended / reactivated.
+        case extended
+        /// Nothing was written (payment already applied, invoice not paid, no plan line, ...).
+        case skipped
+    }
+
     let context: any UnitOfWorkContext
     let invoiceRepositoryFactory: RepositoryFactory<any InvoiceRepository>
     let subscriptionRepositoryFactory: RepositoryFactory<any SubscriptionRepository>
@@ -48,7 +58,8 @@ struct ActivateSubscriptionUseCase: UseCase {
         self.logger = logger
     }
 
-    func execute(params: Params) async throws {
+    @discardableResult
+    func execute(params: Params) async throws -> Outcome {
         let metadata: Logger.Metadata = [
             "invoiceId": .string(params.invoiceId.rawValue), "trigger": .string(params.trigger.rawValue)
         ]
@@ -56,18 +67,18 @@ struct ActivateSubscriptionUseCase: UseCase {
 
         guard let invoice = try await invoiceRepositoryFactory(context).fetch(byId: params.invoiceId) else {
             logger.warning("Invoice not found, no subscription to activate", metadata: metadata)
-            return
+            return .skipped
         }
         // The event is dispatched after commit: skip if the invoice has moved on (e.g. refunded).
         guard invoice.status == .paid else {
             logger.warning("Invoice is not paid any more, subscription not activated", metadata: metadata.merging([
                 "status": .string(invoice.status.rawValue)
             ]) { $1 })
-            return
+            return .skipped
         }
         guard let line = invoice.lineItems.first(where: { $0.duration != nil }), let duration = line.duration else {
             logger.error("Invoice has no plan line, subscription not activated", metadata: metadata)
-            return
+            return .skipped
         }
 
         let paymentRef = invoice.transactionId ?? "\(invoice.id.rawValue):\(params.trigger.rawValue)"
@@ -79,12 +90,13 @@ struct ActivateSubscriptionUseCase: UseCase {
                 accountId: invoice.accountId, orderId: invoice.orderId.rawValue, planId: line.productId,
                 duration: duration, paymentRef: paymentRef, now: moment
             ))
-            return
+            return .created
         }
 
         do {
             if try subscription.extend(by: duration, paymentRef: paymentRef, now: moment) {
                 try await repository.update(entity: subscription)
+                return .extended
             }
         } catch let error as InvalidStatusTransitionError {
             // A cancelled subscription is not reactivated by a late payment event; nothing was mutated.
@@ -92,5 +104,6 @@ struct ActivateSubscriptionUseCase: UseCase {
                 "subscriptionId": .string(subscription.id.rawValue), "reason": .string("\(error)")
             ]) { $1 })
         }
+        return .skipped
     }
 }

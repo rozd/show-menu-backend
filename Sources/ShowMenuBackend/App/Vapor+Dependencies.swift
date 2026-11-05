@@ -152,6 +152,11 @@ extension Application {
         var suspendSubscriptionUseCaseFactory: UseCaseFactory<SuspendSubscriptionUseCase> { get }
         var cancelSubscriptionUseCaseFactory: UseCaseFactory<CancelSubscriptionUseCase> { get }
         var subscriptionInvoiceEventHandler: SubscriptionInvoiceEventHandler { get }
+        var expiringSubscriptionSource: any ExpiringSubscriptionSource { get }
+        var paidInvoiceSource: any PaidInvoiceSource { get }
+        var expireSubscriptionUseCaseFactory: UseCaseFactory<ExpireSubscriptionUseCase> { get }
+        var reconcileSubscriptionUseCaseFactory: UseCaseFactory<ReconcileSubscriptionUseCase> { get }
+        var checkExpiredSubscriptionsJob: CheckExpiredSubscriptionsJob { get }
     }
 
     // MARK: - CompositionRoot
