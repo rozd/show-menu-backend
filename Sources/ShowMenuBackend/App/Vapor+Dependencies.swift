@@ -124,6 +124,14 @@ extension Application {
         // MARK: Purchases
 
         var paymentGateway: any PaymentGateway { get }
+        var orderMapper: OrderMapper { get }
+        var invoiceMapper: InvoiceMapper { get }
+        var checkoutSessionMapper: CheckoutSessionMapper { get }
+        var orderDataSourceFactory: DataSourceFactory<OrderModel> { get }
+        var invoiceDataSourceFactory: DataSourceFactory<InvoiceModel> { get }
+        var checkoutSessionDataSourceFactory: DataSourceFactory<CheckoutSessionModel> { get }
+        var orderRepositoryFactory: RepositoryFactory<any OrderRepository> { get }
+        var invoiceRepositoryFactory: RepositoryFactory<any InvoiceRepository> { get }
     }
 
     // MARK: - CompositionRoot

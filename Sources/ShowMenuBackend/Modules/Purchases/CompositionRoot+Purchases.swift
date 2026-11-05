@@ -3,6 +3,90 @@ import Vapor
 
 extension Application.CompositionRoot {
 
+    // MARK: Purchases — Mappers
+
+    var orderMapper: OrderMapper {
+        resolver.resolve(\.orderMapper) {
+            OrderMapper()
+        }
+    }
+
+    var invoiceMapper: InvoiceMapper {
+        resolver.resolve(\.invoiceMapper) {
+            InvoiceMapper()
+        }
+    }
+
+    var checkoutSessionMapper: CheckoutSessionMapper {
+        resolver.resolve(\.checkoutSessionMapper) {
+            CheckoutSessionMapper()
+        }
+    }
+
+    // MARK: Purchases — Data Sources
+
+    var orderDataSourceFactory: DataSourceFactory<OrderModel> {
+        resolver.resolve(\.orderDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestoreOrderDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var invoiceDataSourceFactory: DataSourceFactory<InvoiceModel> {
+        resolver.resolve(\.invoiceDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestoreInvoiceDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var checkoutSessionDataSourceFactory: DataSourceFactory<CheckoutSessionModel> {
+        resolver.resolve(\.checkoutSessionDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestoreCheckoutSessionDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    // MARK: Purchases — Repositories
+
+    var orderRepositoryFactory: RepositoryFactory<any OrderRepository> {
+        resolver.resolve(\.orderRepositoryFactory) {
+            { ctx in
+                FirestoreOrderRepository(
+                    mapper: orderMapper,
+                    dataSourceFactory: orderDataSourceFactory,
+                    context: ctx
+                )
+            }
+        }
+    }
+
+    var invoiceRepositoryFactory: RepositoryFactory<any InvoiceRepository> {
+        resolver.resolve(\.invoiceRepositoryFactory) {
+            { ctx in
+                FirestoreInvoiceRepository(
+                    mapper: invoiceMapper,
+                    dataSourceFactory: invoiceDataSourceFactory,
+                    context: ctx
+                )
+            }
+        }
+    }
+
     // MARK: Purchases — Payment Gateway
 
     var paymentGateway: any PaymentGateway {
