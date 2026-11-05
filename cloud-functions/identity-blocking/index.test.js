@@ -343,19 +343,19 @@ test("readJwt returns null for garbage / missing jwt", () => {
 test("extractUserRecord parses object and string custom_claims", () => {
   assert.deepEqual(
     fn.extractUserRecord({ user_record: { email: "a@b.com", custom_claims: { role: "x" } } }),
-    { email: "a@b.com", customClaims: { role: "x" } }
+    { email: "a@b.com", emailVerified: false, customClaims: { role: "x" } }
   );
   assert.deepEqual(
     fn.extractUserRecord({ user_record: { email: "a@b.com", custom_claims: '{"role":"y"}' } }),
-    { email: "a@b.com", customClaims: { role: "y" } }
+    { email: "a@b.com", emailVerified: false, customClaims: { role: "y" } }
   );
 });
 
 test("extractUserRecord defaults invalid/missing fields", () => {
-  assert.deepEqual(fn.extractUserRecord({ user_record: {} }), { email: "", customClaims: {} });
+  assert.deepEqual(fn.extractUserRecord({ user_record: {} }), { email: "", emailVerified: false, customClaims: {} });
   assert.deepEqual(
     fn.extractUserRecord({ user_record: { email: 5, custom_claims: "not json" } }),
-    { email: "", customClaims: {} }
+    { email: "", emailVerified: false, customClaims: {} }
   );
   assert.equal(fn.extractUserRecord({}), null);
   assert.equal(fn.extractUserRecord(null), null);
@@ -392,7 +392,7 @@ test("handleBlockingRequest fails open (200 {}) on an unverifiable JWT", async (
   teardown();
 });
 
-test("handleBlockingRequest returns 200 {} for a valid token with no-op policy", async () => {
+test("handleBlockingRequest returns 200 {} for a valid token whose user is not an admin", async () => {
   setup();
   process.env.FUNCTION_URL = AUDIENCE;
   const res = fakeRes();
@@ -401,7 +401,7 @@ test("handleBlockingRequest returns 200 {} for a valid token with no-op policy",
     res
   );
   assert.equal(res._status, 200);
-  // Stub decideUserClaims returns null → no change.
+  // Not allow-listed → no change.
   assert.deepEqual(res._body, {});
   delete process.env.FUNCTION_URL;
   teardown();
@@ -471,5 +471,69 @@ test("successful JWKS fetch is cached and not refetched within the throttle wind
   await fn.verifyAuthBlockingJwt(makeJwt(), AUDIENCE);
   assert.equal(calls, 1, "JWKS should be fetched once and served from cache");
 
+  teardown();
+});
+
+// === decideUserClaims: ADMIN_EMAILS policy ====================================
+
+function withAdminEmails(value, fnBody) {
+  const prev = process.env.ADMIN_EMAILS;
+  if (value === undefined) delete process.env.ADMIN_EMAILS; else process.env.ADMIN_EMAILS = value;
+  try { return fnBody(); } finally {
+    if (prev === undefined) delete process.env.ADMIN_EMAILS; else process.env.ADMIN_EMAILS = prev;
+  }
+}
+
+test("decideUserClaims grants admin to a verified allow-listed email (case/space-insensitive)", () => {
+  withAdminEmails(" Boss@Example.com , other@x.io ", () => {
+    assert.deepEqual(
+      fn.decideUserClaims({ email: "boss@example.com", emailVerified: true, customClaims: { tier: "gold" } }),
+      { tier: "gold", admin: true }
+    );
+  });
+});
+
+test("decideUserClaims does nothing for an unverified allow-listed email", () => {
+  withAdminEmails("boss@example.com", () => {
+    assert.equal(fn.decideUserClaims({ email: "boss@example.com", emailVerified: false, customClaims: {} }), null);
+  });
+});
+
+test("decideUserClaims does nothing for a non-allow-listed, empty-email or already-admin user", () => {
+  withAdminEmails("boss@example.com", () => {
+    assert.equal(fn.decideUserClaims({ email: "u@example.com", emailVerified: true, customClaims: {} }), null);
+    assert.equal(fn.decideUserClaims({ email: "", emailVerified: true, customClaims: {} }), null);
+    assert.equal(
+      fn.decideUserClaims({ email: "boss@example.com", emailVerified: true, customClaims: { admin: true } }),
+      null
+    );
+  });
+});
+
+test("decideUserClaims does nothing when ADMIN_EMAILS is unset or blank", () => {
+  withAdminEmails(undefined, () => {
+    assert.equal(fn.decideUserClaims({ email: "a@b.com", emailVerified: true, customClaims: {} }), null);
+  });
+  withAdminEmails(" , ", () => {
+    assert.equal(fn.decideUserClaims({ email: "", emailVerified: true, customClaims: {} }), null);
+  });
+});
+
+test("handleBlockingRequest returns the admin claim for an allow-listed verified user", async () => {
+  setup();
+  process.env.FUNCTION_URL = AUDIENCE;
+  process.env.ADMIN_EMAILS = "boss@example.com";
+  const res = fakeRes();
+  await fn.handleBlockingRequest(
+    {
+      body: { data: { jwt: makeJwt({ payload: { user_record: { email: "boss@example.com", email_verified: true, custom_claims: {} } } }) } },
+      headers: { host: "ignored" },
+    },
+    res
+  );
+  assert.equal(res._status, 200);
+  assert.deepEqual(res._body, { userRecord: { updateMask: "customClaims", customClaims: { admin: true } } });
+  delete process.env.FUNCTION_URL;
+  delete process.env.ADMIN_EMAILS;
   teardown();
 });

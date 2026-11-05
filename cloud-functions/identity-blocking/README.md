@@ -2,7 +2,7 @@
 
 GCP Identity Platform blocking functions (`beforeCreate` / `beforeSignIn`) — a deployable stub for setting custom claims on a user during sign-up and sign-in. Zero-dependency, deployed via `gcloud functions deploy` (no Firebase CLI).
 
-The policy decision is a TODO at `decideUserClaims(userRecord)` in [`index.js`](index.js). Out of the box the function is a no-op: it decodes the inbound JWT and responds HTTP 200 `{}` for every user. Fill in `decideUserClaims` with your rule (allow-list → role claim, tenant invariant, domain check, etc.).
+The policy is `decideUserClaims(userRecord)` in [`index.js`](index.js): a user whose **verified** email is in the `ADMIN_EMAILS` env var (comma-separated, case-insensitive) gets the custom claim `{admin: true}` (other claims preserved). Everyone else, and anyone already `admin`, is left untouched (grant-only; an existing admin claim is never revoked here). Any error fails open with `{}`.
 
 ## At a glance
 
@@ -52,7 +52,7 @@ Identity Platform persists the returned customClaims onto the user record
 | `GOOGLE_CLOUD_PROJECT` (or legacy `GCLOUD_PROJECT`) | No | GCP project ID used to build the expected JWT `iss` (`https://securetoken.google.com/<project>`). **Cloud Functions gen-2 / Cloud Run do not set this automatically** (unlike App Engine or gen-1) — when both env vars are absent, the function falls back to the GCE metadata server (`metadata.google.internal/computeMetadata/v1/project/project-id`) and memoizes the result. Set this env var manually only if you run the function outside Google Cloud (e.g. self-hosted tests) or want to override auto-detection. |
 | `FUNCTION_URL` | No (recommended) | The function's own deployed URL (e.g. `https://identity-beforesignedin-xxxxx.run.app`), used as the expected JWT `aud`. When set, `aud` becomes a real, non-attacker-controlled defense-in-depth check. When **unset**, the function falls back to deriving `aud` from the request `Host` header — which a direct caller on the open gateway controls, so it provides no protection (the signature + `iss` checks remain the actual boundary either way). Set it after the first deploy once the stable gen-2 URI is known (see the **Register** step, which already captures it). |
 
-The stub takes no policy-specific env vars. When you implement `decideUserClaims`, add policy inputs (allow-lists, feature flags, etc.) and set them at deploy time with `--set-env-vars=...`.
+`ADMIN_EMAILS` — comma-separated admin emails, set at deploy time with `--set-env-vars=ADMIN_EMAILS=...`. Unset/blank means nobody is promoted.
 
 > **`gcloud` and comma-valued env vars.** `gcloud` dict flags (`--set-env-vars`, `--update-env-vars`) use `,` as the pair separator, so a comma-containing value like `a@x.com,b@y.com` is misread as two pairs (`Bad syntax for dict arg: [b@y.com]`). The `^DELIM^` prefix (see `gcloud topic escaping`) reassigns the separator: `--set-env-vars="^|^MY_LIST=a@x.com,b@y.com"`. Equivalent alternative: `--env-vars-file=env.yaml`.
 
