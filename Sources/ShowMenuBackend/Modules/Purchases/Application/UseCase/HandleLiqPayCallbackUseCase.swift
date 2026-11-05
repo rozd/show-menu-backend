@@ -90,7 +90,12 @@ struct HandleLiqPayCallbackUseCase: UseCase {
                     }
                     orderChanged = try order?.complete(invoiceId: invoice.id) ?? false
                 case .failed:
-                    if invoice.status == .paid {
+                    if invoice.status == .paid, let reference, reference == invoice.transactionId {
+                        // A late failure for the very payment already applied: not a failed
+                        // recurring charge. Audit only; never suspend on it.
+                        logger.warning("LiqPay failure for an already-applied payment, ignored", metadata: metadata)
+                        leaveSession = true
+                    } else if invoice.status == .paid {
                         invoiceChanged = try invoice.recordChargeFailure()
                         leaveSession = true
                     } else {
