@@ -42,6 +42,19 @@ struct PurchaseSubscriptionTests {
         }
     }
 
+    /// A unit of work whose every `execute` fails, standing in for a store outage while the
+    /// checkout failure is being recorded.
+    private struct FailingUnitOfWork: UnitOfWork {
+        struct Outage: Error, Equatable {}
+        let dispatcher: any DomainEventDispatcher = SpyDomainEventDispatcher()
+
+        func execute<Result: Sendable>(
+            _ work: @escaping @Sendable (StubUnitOfWorkContext) async throws -> Result
+        ) async throws -> Result {
+            throw Outage()
+        }
+    }
+
     private struct SUT {
         let accounts: InMemoryDataSource<AccountModel>
         let permissions: InMemoryPermissionStore
@@ -61,7 +74,7 @@ struct PurchaseSubscriptionTests {
     private let accountId = "account-1"
     private let creator = "uid-creator"
 
-    private func makeSUT(planActive: Bool = true, blindScan: Bool = false) async throws -> SUT {
+    private func makeSUT(planActive: Bool = true, blindScan: Bool = false, failRecording: Bool = false) async throws -> SUT {
         let logger = Logger(label: "test", factory: { _ in CapturingLogHandler() })
         let accounts = InMemoryDataSource<AccountModel>(id: { $0.id })
         let permissions = InMemoryPermissionStore()
@@ -135,7 +148,8 @@ struct PurchaseSubscriptionTests {
             logger: logger
         )
         let initiator = CheckoutInitiator(
-            unitOfWork: uow,
+            // The purchase itself commits through `uow`; only the post-commit recording fails.
+            unitOfWork: failRecording ? FailingUnitOfWork() : uow,
             gateway: gateway,
             sessionDataSourceFactory: { _, _ in sessions },
             sessionMapper: sessionMapper,
@@ -473,6 +487,23 @@ struct PurchaseSubscriptionTests {
         let retry = try? await run(sut, as: owner, command(sut))
         #expect(retry == nil)  // gateway still failing, but it got past the 409 guard:
         #expect(await sut.orders.insertedModels.count == 2)
+    }
+
+    @Test("recording the failure fails too: the gateway error is still the one surfaced")
+    func gatewayFailureRecordingFails() async throws {
+        let sut = try await makeSUT(failRecording: true)
+        await sut.users.seed(UserModel(id: creator, email: "a@b.c", name: "A"))
+        await sut.gateway.failWith(.transport("boom"))
+
+        // Not `Outage`: the client must see the gateway's hint (502/503), not a storage error.
+        await #expect(throws: PaymentGatewayError.transport("boom")) {
+            _ = try await run(sut, as: owner, command(sut))
+        }
+
+        // Nothing could be recorded: the purchase stays as committed, session still pending.
+        let invoice = try #require(await sut.invoices.insertedModels.first)
+        #expect(try await sut.sessions.fetch(byId: invoice.id)?.status == .pending)
+        #expect(try await sut.invoices.fetch(byId: invoice.id)?.status == .pending)
     }
 
     // MARK: Idempotency
