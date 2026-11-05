@@ -365,7 +365,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - [x] S02 Error contract and shared kernel
 - [x] S03 Authentication and admin guard
 - [x] S04 Catalog: Features (+ remove Items)
-- [ ] S05 Plans: create, get, list
+- [x] S05 Plans: create, get, list
 - [ ] S06 Plans: mutations
 - [ ] S07 Users onboarding, admin claim, webhook auth
 - [ ] S08 Accounts linking (firestore-forwarder)
@@ -430,6 +430,14 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **S04:** Idempotency and ETag/If-Match are now **unwired** (the only users were the Items endpoints). AGENTS.md says so; S11 (`IdempotentCommandHandler`) and S06 (optional ETag) re-wire them.
 - **S04:** Feature routes are on the `admin` group next to `PlansGuardRouteV1`; the explicit `POST/PUT /plans/features[/:id]` win over the guard's `/plans/**` catch-all. The guard is untouched.
 - **S04:** Harness `plans-lifecycle`: "create a Feature" ✓; "create Plan", "activate Plan", "fetch Plan" ✕ (S05/S06 scope, plans don't exist yet). `auth-rbac` 4/4 ✓, `smoke` 2/2 ✓.
+
+### Decisions taken (S05)
+- **S05 (library bug):** the pinned FirebaseAPI cannot run a query inside a transaction: `Firestore.runQuery(query:transactionID:)` sets `parent = database.database` (no `/documents`), which Firestore rejects (`Document parent name ... lacks "/"`) for every root-collection query. Direct `Query.getDocuments` is fine. **Fallback:** the duplicate-SKU check is a non-transactional (`.direct`) query just before the insert (`FirestorePlanRepository.lookupTransaction`). A concurrent create of the same SKU inside that window is not detected (admin-only endpoint; accepted). A SKU marker doc (`create` precondition) would close it if ever needed. Also affects S11 (pending-session check) and S15.
+- **S05:** duplicate SKU → 409 via `PlanSKUAlreadyExistsError` (`DomainError` + `HTTPStatusHinted`, conformance in `Catalog+Vapor.swift`). Every other invariant (`Plan.Error`, `LocalizedString.Error`, `PriceDTO.Error`) is a `ValidationError` → 422; missing/blank fields are 422 too (payload fields are optional, except inside `price`, where a missing `currencyName`/`amount` is a 400 decode error).
+- **S05:** `plans/{id}` = Node's shape (`id, SKU, name, description, isActive, prices[{price{currency{symbol,name,base,digits},amount},duration}], features[{featureId,quota{unit,limit}}], createdAt, updatedAt`) + additive `version`. Absent currency details are written as explicit `null` (verified: the Firestore encoder does write `NSNull`). Numbers are `Double` (whole values are stored as Firestore doubles; Node stored integers; Flutter reads `num`). Flutter reads `id, name, description, prices, isActive` (not `features`).
+- **S05:** `GET /plans` returns all plans, oldest first, unpaged (the harness does not list; Flutter streams the whole collection). `POST /plans` answers 200. `GET /plans/:planId` unknown → 404.
+- **S05:** `PlansGuardRouteV1` now only holds the `/plans/**` catch-all; the `GET /plans` stub is gone (`FirebaseAuthTests` registers its own stand-in). `InMemoryDataSource` gained an optional `matchesFilter`.
+- **S05:** Harness: `plans-lifecycle` create Feature ✓, create Plan ✓, activate ✕ (S06), fetch ✕ (GET returns 200; fails only on `isActive` because activate is S06). `auth-rbac` 4/4 ✓, `smoke` 2/2 ✓.
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.

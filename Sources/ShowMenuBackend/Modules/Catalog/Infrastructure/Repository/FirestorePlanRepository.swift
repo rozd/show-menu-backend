@@ -5,6 +5,11 @@ struct FirestorePlanRepository: PlanRepository {
     let mapper: any Mapper<Plan, PlanModel, PlanDTO>
     let dataSourceFactory: DataSourceFactory<PlanModel>
     let context: any UnitOfWorkContext
+    /// Transaction handle for the SKU lookup. The pinned FirebaseAPI cannot run a
+    /// query *inside* a transaction (its transactional `runQuery` sends an invalid
+    /// `parent`), so production passes a `.direct` handle; defaults to the
+    /// unit-of-work transaction for other stores/tests.
+    var lookupTransaction: (@Sendable () -> any Sendable)? = nil
 
     var dataSource: any DataSource<PlanModel> {
         dataSourceFactory("", context.transaction)
@@ -18,7 +23,7 @@ struct FirestorePlanRepository: PlanRepository {
     }
 
     func fetch(bySKU sku: String) async throws -> Plan? {
-        let result = try await dataSourceFactory("", context.transaction).query(
+        let result = try await dataSourceFactory("", lookupTransaction?() ?? context.transaction).query(
             DataSourceQuery(
                 filters: [DataSourceFilter(field: "SKU", op: .equal, value: sku)],
                 limit: 1
