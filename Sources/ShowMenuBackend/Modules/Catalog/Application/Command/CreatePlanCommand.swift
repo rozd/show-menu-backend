@@ -33,3 +33,16 @@ struct CreatePlanCommand: Command {
     let payload: Payload
     let metadata: CommandMetadata
 }
+
+extension CreatePlanCommand.FeatureInput {
+    /// Parses the raw request line into a `PlanFeature`; every failure is a
+    /// `ValidationError` (422).
+    func toPlanFeature() throws -> PlanFeature {
+        guard let featureId, !featureId.isEmpty else { throw Plan.Error.featureIdRequired }
+        guard let quota, let limit = quota.limit else { throw Plan.Error.quotaRequired }
+        return PlanFeature(
+            featureId: Feature.Id(rawValue: featureId),
+            quota: FeatureQuota(unit: try Plan.parseQuotaUnit(quota.unit), limit: limit)
+        )
+    }
+}

@@ -77,6 +77,16 @@ extension Application {
         var planRepositoryFactory: RepositoryFactory<any PlanRepository> { get }
         var createPlanUseCaseFactory: UseCaseFactory<CreatePlanUseCase> { get }
         var createPlanCommandHandler: CreatePlanCommandHandler { get }
+        var updatePlanUseCaseFactory: UseCaseFactory<UpdatePlanUseCase> { get }
+        var activatePlanUseCaseFactory: UseCaseFactory<ActivatePlanUseCase> { get }
+        var deactivatePlanUseCaseFactory: UseCaseFactory<DeactivatePlanUseCase> { get }
+        var addPlanFeatureUseCaseFactory: UseCaseFactory<AddPlanFeatureUseCase> { get }
+        var removePlanFeatureUseCaseFactory: UseCaseFactory<RemovePlanFeatureUseCase> { get }
+        var updatePlanCommandHandler: UpdatePlanCommandHandler { get }
+        var activatePlanCommandHandler: ActivatePlanCommandHandler { get }
+        var deactivatePlanCommandHandler: DeactivatePlanCommandHandler { get }
+        var addPlanFeatureCommandHandler: AddPlanFeatureCommandHandler { get }
+        var removePlanFeatureCommandHandler: RemovePlanFeatureCommandHandler { get }
         var getPlanQueryHandler: GetPlanQueryHandler { get }
         var listPlansQueryHandler: ListPlansQueryHandler { get }
 

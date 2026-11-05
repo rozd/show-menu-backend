@@ -17,5 +17,10 @@ struct PlanRouteV1: RouteCollection {
         plans.get(use: controller.listPlans)
         plans.post(use: controller.createPlan)
         plans.get(":planId", use: controller.getPlan)
+        plans.put(":planId", use: controller.updatePlan)
+        plans.put(":planId", "activate", use: controller.activatePlan)
+        plans.put(":planId", "deactivate", use: controller.deactivatePlan)
+        plans.put(":planId", "features", use: controller.addFeature)
+        plans.delete(":planId", "features", ":featureId", use: controller.removeFeature)
     }
 }

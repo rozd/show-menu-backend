@@ -26,14 +26,7 @@ struct CreatePlanUseCase: UseCase {
             guard let price = input.price else { throw Plan.Error.pricesRequired }
             return PlanPrice(price: try price.toPrice(), duration: try Plan.parseDuration(input.duration))
         }
-        let features = try (payload.features ?? []).map { input -> PlanFeature in
-            guard let featureId = input.featureId, !featureId.isEmpty else { throw Plan.Error.featureIdRequired }
-            guard let quota = input.quota, let limit = quota.limit else { throw Plan.Error.quotaRequired }
-            return PlanFeature(
-                featureId: Feature.Id(rawValue: featureId),
-                quota: FeatureQuota(unit: try Plan.parseQuotaUnit(quota.unit), limit: limit)
-            )
-        }
+        let features = try (payload.features ?? []).map { try $0.toPlanFeature() }
 
         let plan = try Plan.create(
             SKU: sku,

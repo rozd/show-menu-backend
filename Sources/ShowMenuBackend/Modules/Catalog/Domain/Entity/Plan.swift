@@ -89,6 +89,59 @@ final class Plan: AggregateRoot, @unchecked Sendable {
     func validate() throws {
         try Plan.validate(SKU: SKU, prices: prices, features: features)
     }
+
+    /// Replaces name and description (Node `Plan.update`). The lifecycle `updated`
+    /// event is recorded by the Repository.
+    func update(name: LocalizedString, description: LocalizedString, now: Date = .now) {
+        self.name = name
+        self.description = description
+        self.updatedAt = now
+    }
+
+    /// Idempotent: returns `false` (no state change, no event) when already active.
+    @discardableResult
+    func activate(now: Date = .now) -> Bool {
+        guard !isActive else { return false }
+        isActive = true
+        updatedAt = now
+        record(event: .planActivated(aggregateId: id))
+        return true
+    }
+
+    /// Idempotent: returns `false` (no state change, no event) when already inactive.
+    @discardableResult
+    func deactivate(now: Date = .now) -> Bool {
+        guard isActive else { return false }
+        isActive = false
+        updatedAt = now
+        record(event: .planDeactivated(aggregateId: id))
+        return true
+    }
+
+    /// Adds a feature; a duplicate `featureId` violates the invariant (422).
+    /// Validates before mutating, so a rejected call leaves the plan untouched.
+    func addFeature(_ feature: PlanFeature, now: Date = .now) throws {
+        let newFeatures = features + [feature]
+        try Plan.validate(SKU: SKU, prices: prices, features: newFeatures)
+        features = newFeatures
+        updatedAt = now
+        record(event: .planFeatureAdded(aggregateId: id))
+    }
+
+    /// Removes a feature. Unknown id → `PlanFeatureNotFoundError` (404). Removing the
+    /// last feature would break the "at least one feature" invariant → 422 (`featuresRequired`),
+    /// leaving the plan untouched. Records the semantic `plan.feature.removed` (Node bug 7
+    /// recorded `plan.feature.added` here).
+    func removeFeature(_ featureId: Feature.Id, now: Date = .now) throws {
+        guard features.contains(where: { $0.featureId == featureId }) else {
+            throw PlanFeatureNotFoundError(planId: id, featureId: featureId)
+        }
+        let newFeatures = features.filter { $0.featureId != featureId }
+        try Plan.validate(SKU: SKU, prices: prices, features: newFeatures)
+        features = newFeatures
+        updatedAt = now
+        record(event: .planFeatureRemoved(aggregateId: id))
+    }
 }
 
 extension Plan {
