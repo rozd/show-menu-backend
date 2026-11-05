@@ -1,0 +1,12 @@
+{
+  "name": "firestore-forwarder",
+  "version": "1.0.0",
+  "description": "Forwards Firestore document-created events to the Cloud Run backend as CloudEvents. Deployed via gcloud (gen-1); zero npm dependencies.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "20"
+  }
+}
