@@ -77,6 +77,22 @@ struct SharedKernelTests {
         #expect(neg.seconds == -2 && neg.nanos == 500_000_000)
     }
 
+    @Test("Timestamp(exact:) is millisecond-precise like Node's Timestamp.fromDate")
+    func timestampMilliseconds() {
+        // Sub-millisecond digits are floored.
+        let ts = Timestamp(exact: Date(timeIntervalSince1970: 1_700_000_000.123_987))
+        #expect(ts.seconds == 1_700_000_000)
+        #expect(ts.nanos == 123_000_000)
+        // A ms-aligned value round-trips unchanged (S04 drift fix), for every ms of a second.
+        for ms in 0..<1_000 {
+            let aligned = Timestamp(seconds: 1_767_225_600, nanos: Int32(ms) * 1_000_000)
+            #expect(Timestamp(exact: aligned.asDate) == aligned)
+        }
+        // Negative epochs floor toward -inf.
+        let neg = Timestamp(exact: Date(timeIntervalSince1970: -1.5004))
+        #expect(neg.seconds == -2 && neg.nanos == 499_000_000)
+    }
+
     @Test("PriceDTO validates and converts both ways")
     func priceDTO() throws {
         let dto = PriceDTO(currencyName: "UAH", amount: 10)
