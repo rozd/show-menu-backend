@@ -1,0 +1,2 @@
+protocol ItemDataSource: QueryableDataSource<ItemModel> {
+}

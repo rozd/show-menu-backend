@@ -1,0 +1,12 @@
+{
+  "name": "identity-blocking",
+  "version": "1.0.0",
+  "description": "Stub Identity Platform blocking functions (beforeCreate / beforeSignIn) for setting custom claims. Deployed via gcloud (gen-2 HTTP); zero npm dependencies.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "22"
+  }
+}

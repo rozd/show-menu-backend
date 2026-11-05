@@ -1,0 +1,9 @@
+{
+  "name": "auth-forwarder",
+  "version": "1.0.0",
+  "description": "Forwards Firebase Auth events to Cloud Run backend as CloudEvents",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  }
+}

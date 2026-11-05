@@ -1,0 +1,16 @@
+.git
+.gitignore
+.build/
+.swiftpm/
+Packages/
+DerivedData/
+xcuserdata/
+*.xcodeproj
+.DS_Store
+db.sqlite
+.env
+.env.*
+default.profraw
+docker-compose.yml
+README.md
+Tests/

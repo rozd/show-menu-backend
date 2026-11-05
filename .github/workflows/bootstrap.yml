@@ -1,0 +1,204 @@
+name: Bootstrap from template
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Swift package name in PascalCase (e.g. AcmeBackend)"
+        required: true
+        type: string
+      project_name:
+        description: "Project name in kebab-case, no spaces (e.g. acme-backend). Used in Docker, gcloud, and README examples."
+        required: true
+        type: string
+      description:
+        description: "One-line project description"
+        required: true
+        type: string
+      feature_user_lifecycle_enabled:
+        description: "Enable the user lifecycle feature: cloud-functions/auth-forwarder + Eventarc receiver + IAM module. Forwards Firebase Auth user.create/delete events into a User aggregate."
+        required: false
+        default: false
+        type: boolean
+      feature_identity_blocking_enabled:
+        description: "Enable identity-blocking cloud functions: stub beforeUserCreated/beforeUserSignedIn HTTP handlers for setting custom claims via Identity Platform blocking triggers. Policy decision is a TODO in index.js."
+        required: false
+        default: false
+        type: boolean
+      gcp_project_id:
+        description: "GCP project ID (optional, e.g. acme-prod). Leave blank to keep 'your-project-id' placeholder in docs."
+        required: false
+        type: string
+      gcp_region:
+        description: "GCP region (optional, e.g. us-central1, europe-west1). Leave blank to keep 'us-central1' default in docs."
+        required: false
+        type: string
+      backend_url:
+        description: "Cloud Run backend URL (optional, e.g. https://acme-prod-abc123.run.app). Leave blank to keep example placeholder."
+        required: false
+        type: string
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate inputs
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          APP_DESCRIPTION: ${{ inputs.description }}
+          GCP_PROJECT_ID: ${{ inputs.gcp_project_id }}
+          GCP_REGION: ${{ inputs.gcp_region }}
+          BACKEND_URL: ${{ inputs.backend_url }}
+        run: |
+          if [ -z "$APP_NAME" ]; then
+            echo "::error::app_name is required"
+            exit 1
+          fi
+          if ! echo "$APP_NAME" | grep -qE '^[A-Z][a-zA-Z0-9]+$'; then
+            echo "::error::app_name must be PascalCase (start with uppercase, alphanumeric only, at least 2 chars)"
+            exit 1
+          fi
+          if [ -z "$PROJECT_NAME" ]; then
+            echo "::error::project_name is required"
+            exit 1
+          fi
+          if ! echo "$PROJECT_NAME" | grep -qE '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'; then
+            echo "::error::project_name must be kebab-case (lowercase, no spaces, e.g. acme-backend)"
+            exit 1
+          fi
+          if [ -z "$APP_DESCRIPTION" ]; then
+            echo "::error::description is required"
+            exit 1
+          fi
+          # Optional inputs: validate format only if provided
+          if [ -n "$GCP_PROJECT_ID" ] && ! echo "$GCP_PROJECT_ID" | grep -qE '^[a-z][a-z0-9-]{4,28}[a-z0-9]$'; then
+            echo "::error::gcp_project_id must be 6-30 chars, lowercase alphanumeric with hyphens, not starting/ending with hyphen"
+            exit 1
+          fi
+          if [ -n "$GCP_REGION" ] && ! echo "$GCP_REGION" | grep -qE '^[a-z]+-[a-z]+[0-9]+$'; then
+            echo "::error::gcp_region must be a GCP region like us-central1 or europe-west1"
+            exit 1
+          fi
+          if [ -n "$BACKEND_URL" ] && ! echo "$BACKEND_URL" | grep -qE '^https://[a-zA-Z0-9.-]+\.run\.app/?$'; then
+            echo "::error::backend_url must be an https Cloud Run URL ending in .run.app"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive docker image name
+        id: derive
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          # PascalCase → kebab-case: insert hyphen before each uppercase run, lowercase everything
+          DOCKER_IMAGE=$(echo "$APP_NAME" \
+            | sed 's/\([a-z0-9]\)\([A-Z]\)/\1-\2/g' \
+            | tr '[:upper:]' '[:lower:]')
+          echo "docker_image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Derived docker image name: $DOCKER_IMAGE"
+
+      - name: Remove user lifecycle feature if not enabled
+        if: ${{ ! inputs.feature_user_lifecycle_enabled }}
+        run: |
+          rm -rf cloud-functions/auth-forwarder/
+          rm -rf Sources/VaporFirebaseBackendApp/Integration/Eventarc/
+          rm -rf Sources/VaporFirebaseBackendApp/Modules/IAM/
+          rm -rf Tests/VaporFirebaseBackendAppTests/Unit/Modules/IAM/
+          # Strip USER_LIFECYCLE marker blocks from Swift files that retain mixed content
+          for f in \
+            Sources/VaporFirebaseBackendApp/App/Vapor+Dependencies.swift \
+            Sources/VaporFirebaseBackendApp/configure.swift \
+            Sources/VaporFirebaseBackendApp/routes.swift; do
+            sed -i '/\/\/ USER_LIFECYCLE_BEGIN/,/\/\/ USER_LIFECYCLE_END/d' "$f"
+          done
+          # Strip AUTH_FORWARDER marker block from cloud-functions/README.md
+          if [ -f cloud-functions/README.md ]; then
+            sed -i '/<!-- AUTH_FORWARDER_BEGIN -->/,/<!-- AUTH_FORWARDER_END -->/d' cloud-functions/README.md
+          fi
+
+      - name: Remove identity-blocking if not enabled
+        if: ${{ ! inputs.feature_identity_blocking_enabled }}
+        run: |
+          rm -rf cloud-functions/identity-blocking/
+          if [ -f cloud-functions/README.md ]; then
+            sed -i '/<!-- IDENTITY_BLOCKING_BEGIN -->/,/<!-- IDENTITY_BLOCKING_END -->/d' cloud-functions/README.md
+          fi
+
+      - name: Remove empty cloud-functions directory
+        if: ${{ ! inputs.feature_user_lifecycle_enabled && ! inputs.feature_identity_blocking_enabled }}
+        run: |
+          rm -rf cloud-functions/
+
+      - name: Replace text tokens
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          DOCKER_IMAGE: ${{ steps.derive.outputs.docker_image }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          APP_DESCRIPTION: ${{ inputs.description }}
+          GCP_PROJECT_ID: ${{ inputs.gcp_project_id }}
+          GCP_REGION: ${{ inputs.gcp_region }}
+          BACKEND_URL: ${{ inputs.backend_url }}
+        run: |
+          # Find all target files, excluding .git, .build, and this workflow
+          FILES=$(find . \
+            -type f \( -name '*.swift' -o -name '*.md' -o -name '*.yml' -o -name '*.yaml' -o -name '*.js' -o -name 'Dockerfile' \) \
+            -not -path './.git/*' \
+            -not -path './.build/*' \
+            -not -path './.github/workflows/bootstrap.yml')
+
+          # Replace backend URL FIRST (before my-backend → $PROJECT_NAME consumes the example)
+          if [ -n "$BACKEND_URL" ]; then
+            # Use # as sed delimiter since URLs contain /
+            echo "$FILES" | xargs sed -i "s#https://my-backend-xxxxx.run.app#${BACKEND_URL}#g"
+          fi
+
+          # Replace VaporFirebaseBackendApp → $APP_NAME (covers Tests target too)
+          echo "$FILES" | xargs sed -i "s/VaporFirebaseBackendApp/${APP_NAME}/g"
+
+          # Replace vapor-firebase-backend → $DOCKER_IMAGE
+          echo "$FILES" | xargs sed -i "s/vapor-firebase-backend/${DOCKER_IMAGE}/g"
+
+          # Replace my-backend → $PROJECT_NAME (Docker, gcloud, and README examples)
+          echo "$FILES" | xargs sed -i "s/my-backend/${PROJECT_NAME}/g"
+
+          # Optional: replace your-project-id → $GCP_PROJECT_ID (also rewrites your-project-id-staging)
+          if [ -n "$GCP_PROJECT_ID" ]; then
+            echo "$FILES" | xargs sed -i "s/your-project-id/${GCP_PROJECT_ID}/g"
+          fi
+
+          # Optional: replace us-central1 → $GCP_REGION
+          if [ -n "$GCP_REGION" ]; then
+            echo "$FILES" | xargs sed -i "s/us-central1/${GCP_REGION}/g"
+          fi
+
+          # Replace README title
+          sed -i "s/^# Vapor + Firebase Backend Template$/# ${APP_NAME}/" README.md
+
+          # Replace README description (line 3)
+          sed -i "3s/.*/${APP_DESCRIPTION}/" README.md
+
+      - name: Rename source directories
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          mv "Sources/VaporFirebaseBackendApp" "Sources/${APP_NAME}"
+          mv "Tests/VaporFirebaseBackendAppTests" "Tests/${APP_NAME}Tests"
+
+      - name: Delete bootstrap workflow
+        run: rm .github/workflows/bootstrap.yml
+
+      - name: Commit and push
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Bootstrap project as ${APP_NAME}"
+          git push

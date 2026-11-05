@@ -1,0 +1,2 @@
+protocol UserDataSource: QueryableDataSource<UserModel> {
+}

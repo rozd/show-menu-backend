@@ -1,0 +1,15 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+xcuserdata/
+.git/
+.gitignore
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+*.md
+specs/
+.DS_Store
+.env*
+!.env.example
