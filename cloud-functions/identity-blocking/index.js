@@ -5,11 +5,10 @@
 // `gcloud functions deploy --gen2 --trigger-http --allow-unauthenticated`.
 // Wire format, security model, deploy/register commands and runbook: see README.md.
 //
-// This is a STUB. The policy decision lives in `decideUserClaims` below — it
-// currently returns `null` (no change) for every user. Fill it in with your
-// own rule (e.g. an env-driven allow-list → role claim, a domain check, a
-// tenant invariant). Do not modify the JWT verification or wire-format
-// helpers — they implement the Identity Platform blocking-function spec.
+// The policy decision lives in `decideUserClaims` below: `ADMIN_EMAILS` (env,
+// comma-separated) → `{admin: true}` for verified emails. Do not modify the JWT
+// verification or wire-format helpers — they implement the Identity Platform
+// blocking-function spec.
 
 const crypto = require("node:crypto");
 const http = require("node:http");
@@ -228,29 +227,48 @@ async function verifyAuthBlockingJwt(token, expectedAudience) {
 
 // === Domain logic =============================================================
 
+/** Comma-separated env value -> Set of emails: split, trim, lower-case, drop blanks. */
+function parseEmailAllowlist(envValue) {
+  if (!envValue) return new Set();
+  return new Set(
+    String(envValue)
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0)
+  );
+}
+
 /**
  * Decide the next custom-claims object for this user. Returns either:
  *   - the COMPLETE next claims map (Identity Platform replaces the whole map), or
  *   - `null` to indicate "no change".
  *
- * TODO: implement your policy here. Common patterns:
- *   - Set/unset a role claim based on an env-driven allow-list (e.g. process.env.ADMIN_EMAILS)
- *   - Enforce a tenant or organization invariant derived from userRecord.email's domain
- *   - Preserve claims you don't own — spread userRecord.customClaims and only touch your keys
- *
- * Guard against oversize payloads so a malformed policy doesn't block real users:
- *
- *   if (Buffer.byteLength(JSON.stringify(next), "utf8") > MAX_CUSTOM_CLAIMS_BYTES) {
- *     return null;
- *   }
+ * Policy: a user whose VERIFIED email is in the `ADMIN_EMAILS` allow-list
+ * (comma-separated env, case-insensitive) gets `admin: true`. Other claims are
+ * preserved. The policy only ever grants: a user who is not allow-listed is left
+ * untouched (an existing admin claim is NOT revoked here). The allow-list is read
+ * on every call so it can be changed without a cold start.
  *
  * Parameters:
- *   userRecord.email        — string (may be empty)
- *   userRecord.customClaims — object (the user's current custom claims, may be {})
+ *   userRecord.email         — string (may be empty)
+ *   userRecord.emailVerified — boolean
+ *   userRecord.customClaims  — object (the user's current custom claims, may be {})
  */
 function decideUserClaims(userRecord) {
-  // No-op stub: never changes claims. Replace with your policy.
-  return null;
+  const email = String((userRecord && userRecord.email) || "").trim().toLowerCase();
+  if (!email || !(userRecord && userRecord.emailVerified === true)) return null;
+  if (!parseEmailAllowlist(process.env.ADMIN_EMAILS).has(email)) return null;
+
+  const current = (userRecord.customClaims && typeof userRecord.customClaims === "object")
+    ? userRecord.customClaims
+    : {};
+  if (current.admin === true) return null;
+
+  const next = { ...current, admin: true };
+  if (Buffer.byteLength(JSON.stringify(next), "utf8") > MAX_CUSTOM_CLAIMS_BYTES) {
+    return null;
+  }
+  return next;
 }
 
 /** Pluck `data.jwt` from the request body (object, JSON string, or Buffer). */
@@ -278,6 +296,7 @@ function extractUserRecord(payload) {
   if (!customClaims || typeof customClaims !== "object") customClaims = {};
   return {
     email: typeof userRecord.email === "string" ? userRecord.email : "",
+    emailVerified: userRecord.email_verified === true,
     customClaims,
   };
 }
@@ -345,6 +364,7 @@ exports.beforeSignedIn = (req, res) => handleBlockingRequest(req, res);
 
 // Exposed for tests.
 exports.decideUserClaims = decideUserClaims;
+exports.parseEmailAllowlist = parseEmailAllowlist;
 exports.verifyAuthBlockingJwt = verifyAuthBlockingJwt;
 exports.readJwt = readJwt;
 exports.extractUserRecord = extractUserRecord;
