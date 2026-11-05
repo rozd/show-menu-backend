@@ -354,6 +354,9 @@ struct FirebaseAuthTests {
             let authenticated = app.grouped("api").grouped(FirebaseAuthMiddleware(verifier: verifier))
             let admin = authenticated.grouped(RequireAdminMiddleware())
             try admin.register(collection: PlansGuardRouteV1())
+            // Stand-in for the Catalog module's `GET /plans` (S05): the guard only
+            // covers paths below `/plans`, the module owns `/plans` itself.
+            admin.get("v1", "plans") { _ async -> [String] in [] }
             authenticated.get("v1", "whoami") { _ async -> String in
                 RequestContext.principal?.id ?? "none"
             }

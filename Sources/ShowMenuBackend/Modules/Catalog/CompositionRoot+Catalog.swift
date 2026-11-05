@@ -10,12 +10,30 @@ extension Application.CompositionRoot {
         }
     }
 
+    var planMapper: PlanMapper {
+        resolver.resolve(\.planMapper) {
+            PlanMapper()
+        }
+    }
+
     // MARK: Catalog — Data Sources
 
     var featureDataSourceFactory: DataSourceFactory<FeatureModel> {
         resolver.resolve(\.featureDataSourceFactory) {
             { [logger = app.logger] prefix, transaction in
                 FirestoreFeatureDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
+    var planDataSourceFactory: DataSourceFactory<PlanModel> {
+        resolver.resolve(\.planDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestorePlanDataSource(
                     transaction: transaction as! FirestoreTransaction,
                     prefix: firestorePrefix(prefix),
                     logger: logger
@@ -32,6 +50,18 @@ extension Application.CompositionRoot {
                 FirestoreFeatureRepository(
                     mapper: featureMapper,
                     dataSourceFactory: featureDataSourceFactory,
+                    context: ctx
+                )
+            }
+        }
+    }
+
+    var planRepositoryFactory: RepositoryFactory<any PlanRepository> {
+        resolver.resolve(\.planRepositoryFactory) {
+            { ctx in
+                FirestorePlanRepository(
+                    mapper: planMapper,
+                    dataSourceFactory: planDataSourceFactory,
                     context: ctx
                 )
             }
@@ -66,6 +96,19 @@ extension Application.CompositionRoot {
         }
     }
 
+    var createPlanUseCaseFactory: UseCaseFactory<CreatePlanUseCase> {
+        resolver.resolve(\.createPlanUseCaseFactory) {
+            { [logger = app.logger] ctx in
+                CreatePlanUseCase(
+                    context: ctx,
+                    repositoryFactory: planRepositoryFactory,
+                    mapper: planMapper,
+                    logger: logger
+                )
+            }
+        }
+    }
+
     // MARK: Catalog — Command Handlers
 
     var createFeatureCommandHandler: CreateFeatureCommandHandler {
@@ -83,6 +126,40 @@ extension Application.CompositionRoot {
             UpdateFeatureCommandHandler(
                 unitOfWork: unitOfWork,
                 useCaseFactory: updateFeatureUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    var createPlanCommandHandler: CreatePlanCommandHandler {
+        resolver.resolve(\.createPlanCommandHandler) {
+            CreatePlanCommandHandler(
+                unitOfWork: unitOfWork,
+                useCaseFactory: createPlanUseCaseFactory,
+                logger: app.logger
+            )
+        }
+    }
+
+    // MARK: Catalog — Query Handlers
+
+    var getPlanQueryHandler: GetPlanQueryHandler {
+        resolver.resolve(\.getPlanQueryHandler) {
+            GetPlanQueryHandler(
+                dataSourceFactory: planDataSourceFactory,
+                transaction: .direct(firestore: firestore),
+                mapper: planMapper,
+                logger: app.logger
+            )
+        }
+    }
+
+    var listPlansQueryHandler: ListPlansQueryHandler {
+        resolver.resolve(\.listPlansQueryHandler) {
+            ListPlansQueryHandler(
+                dataSourceFactory: planDataSourceFactory,
+                transaction: .direct(firestore: firestore),
+                mapper: planMapper,
                 logger: app.logger
             )
         }

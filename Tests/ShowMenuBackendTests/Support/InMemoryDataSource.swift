@@ -12,6 +12,9 @@ actor InMemoryDataSource<Model: Sendable>: QueryableDataSource {
 
     private var store: [String: Model] = [:]
     private let extractId: @Sendable (Model) -> String
+    /// Optional filter evaluator. Without it `query` ignores filters (legacy
+    /// behaviour); with it every filter must hold for a model to be returned.
+    private let matchesFilter: (@Sendable (Model, DataSourceFilter) -> Bool)?
 
     // MARK: - Captured interactions
 
@@ -20,8 +23,12 @@ actor InMemoryDataSource<Model: Sendable>: QueryableDataSource {
     private(set) var deletedIds: [String] = []
     private(set) var queries: [DataSourceQuery] = []
 
-    init(id: @escaping @Sendable (Model) -> String) {
+    init(
+        id: @escaping @Sendable (Model) -> String,
+        matchesFilter: (@Sendable (Model, DataSourceFilter) -> Bool)? = nil
+    ) {
         self.extractId = id
+        self.matchesFilter = matchesFilter
     }
 
     // MARK: - DataSource
@@ -77,6 +84,9 @@ actor InMemoryDataSource<Model: Sendable>: QueryableDataSource {
         // In-memory ignores `orders`/`filters`; items are sorted by extracted id
         // so `offset`/`limit` paging is deterministic.
         var items = store.values.sorted { extractId($0) < extractId($1) }
+        if let matchesFilter {
+            items = items.filter { model in query.filters.allSatisfy { matchesFilter(model, $0) } }
+        }
         if let offset = query.offset { items = Array(items.dropFirst(offset)) }
         if let limit = query.limit { items = Array(items.prefix(limit)) }
         return QueryResult(items: items)
