@@ -24,6 +24,9 @@ let package = Package(
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", from: "2.0.0"),
         // 🔑 Google Auth - Application Default Credentials and OAuth2 access tokens for GCP APIs
         .package(url: "https://github.com/googleapis/swift-google-auth", from: "0.6.0"),
+        // 💳 LiqPay client (signing, status, webhook decoding). Manifest is swift-tools 6.3.
+        //    Pinned to a revision; bump deliberately.
+        .package(url: "https://github.com/summerhammer/liqpay-client.git", revision: "fcfdf522d121b5c12783a2745803ce9cecc82ddd"),
     ],
     targets: [
         .target(
@@ -39,6 +42,8 @@ let package = Package(
                 .product(name: "FirestoreAPI", package: "FirebaseAPI"),
                 .product(name: "GRPCNIOTransportHTTP2", package: "grpc-swift-nio-transport"),
                 .product(name: "GoogleAuth", package: "swift-google-auth"),
+                .product(name: "LiqPayClient", package: "liqpay-client"),
+                .product(name: "LiqPayClientVapor", package: "liqpay-client"),
             ],
             // Documentation-only files living next to sources. SwiftPM has no glob
             // for `exclude`, so add new README paths here when introducing them.
@@ -65,6 +70,7 @@ let package = Package(
                 .target(name: "ShowMenuBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
                 .product(name: "GoogleAuth", package: "swift-google-auth"),
+                .product(name: "LiqPayClient", package: "liqpay-client"),
             ],
             swiftSettings: swiftSettings
         ),
