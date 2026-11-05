@@ -120,6 +120,10 @@ extension Application {
         var grantAccountOwnerPermissionUseCaseFactory: UseCaseFactory<GrantAccountOwnerPermissionUseCase> { get }
         var grantAccountOwnerPermissionCommandHandler: GrantAccountOwnerPermissionCommandHandler { get }
         var grantOwnerPermissionOnAccountCreatedHandler: GrantOwnerPermissionOnAccountCreatedHandler { get }
+
+        // MARK: Purchases
+
+        var paymentGateway: any PaymentGateway { get }
     }
 
     // MARK: - CompositionRoot
