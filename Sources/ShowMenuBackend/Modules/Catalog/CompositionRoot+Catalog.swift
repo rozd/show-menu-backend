@@ -42,6 +42,18 @@ extension Application.CompositionRoot {
         }
     }
 
+    var planSKUDataSourceFactory: DataSourceFactory<PlanSKUModel> {
+        resolver.resolve(\.planSKUDataSourceFactory) {
+            { [logger = app.logger] prefix, transaction in
+                FirestorePlanSKUDataSource(
+                    transaction: transaction as! FirestoreTransaction,
+                    prefix: firestorePrefix(prefix),
+                    logger: logger
+                )
+            }
+        }
+    }
+
     // MARK: Catalog — Repositories
 
     var featureRepositoryFactory: RepositoryFactory<any FeatureRepository> {
@@ -62,6 +74,7 @@ extension Application.CompositionRoot {
                 FirestorePlanRepository(
                     mapper: planMapper,
                     dataSourceFactory: planDataSourceFactory,
+                    skuDataSourceFactory: planSKUDataSourceFactory,
                     context: ctx,
                     lookupTransaction: { [firestore] in FirestoreTransaction.direct(firestore: firestore) }
                 )

@@ -22,12 +22,19 @@ struct Price: Sendable, Hashable, Codable {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let currency = try c.decode(Currency.self, forKey: .currency)
-        let amount = try c.decode(Double.self, forKey: .amount)
+        let amount = try c.decodeJSNumber(forKey: .amount)
         guard amount >= 0 else {
             throw DecodingError.dataCorruptedError(forKey: .amount, in: c, debugDescription: "Price cannot be negative")
         }
         self.currency = currency
         self.amount = amount
+    }
+
+    /// Whole amounts are written as integers, like a JS `number` (see `encodeJSNumber`).
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(currency, forKey: .currency)
+        try c.encodeJSNumber(amount, forKey: .amount)
     }
 }
 

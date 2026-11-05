@@ -12,6 +12,26 @@ struct FeatureQuota: Sendable, Hashable, Codable {
     let limit: Double
 
     var isUnlimited: Bool { limit <= 0 }
+
+    private enum CodingKeys: String, CodingKey { case unit, limit }
+
+    init(unit: FeatureQuotaUnit, limit: Double) {
+        self.unit = unit
+        self.limit = limit
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.unit = try c.decode(FeatureQuotaUnit.self, forKey: .unit)
+        self.limit = try c.decodeJSNumber(forKey: .limit)
+    }
+
+    /// Whole limits are written as integers, like a JS `number`.
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(unit, forKey: .unit)
+        try c.encodeJSNumber(limit, forKey: .limit)
+    }
 }
 
 /// A feature granted by a plan with its quota: `{featureId, quota}`.

@@ -151,4 +151,63 @@ struct PlanMapperTests {
         #expect(restored.name == original.name && restored.description == original.description)
         #expect(abs(restored.createdAt.timeIntervalSince(original.createdAt)) < 0.001)
     }
+
+    // MARK: Numeric value kinds (Flutter casts `digits as int?`, `(amount as num).toInt()`)
+
+    private func isInteger(_ value: Any?) -> Bool { value is Int || value is Int64 || value is Int32 }
+
+    @Test("whole numbers are encoded as integers, fractions as doubles (JS number semantics)")
+    func numericKinds() throws {
+        func encode(amount: Double, limit: Double) throws -> [String: Any] {
+            let plan = Plan(
+                id: .init(rawValue: "plan-1"), SKU: "S",
+                name: try LocalizedString(["en": "n"]), description: try LocalizedString(["en": "d"]),
+                isActive: true,
+                prices: [PlanPrice(
+                    price: try Price(currency: Currency(name: "USD", symbol: "$", base: 100, digits: 2), amount: amount),
+                    duration: .monthly
+                )],
+                features: [PlanFeature(featureId: .init(rawValue: "f"), quota: FeatureQuota(unit: .count, limit: limit))]
+            )
+            return try FirestoreEncoder().encode(mapper.toModel(entity: plan))
+        }
+        func fields(_ doc: [String: Any]) throws -> (currency: [String: Any], price: [String: Any], quota: [String: Any]) {
+            let price = try #require(((doc["prices"] as? [[String: Any]])?.first?["price"]) as? [String: Any])
+            let quota = try #require(((doc["features"] as? [[String: Any]])?.first?["quota"]) as? [String: Any])
+            return (try #require(price["currency"] as? [String: Any]), price, quota)
+        }
+
+        let whole = try fields(encode(amount: 2900, limit: 100))
+        #expect(isInteger(whole.currency["digits"]), "digits must be integerValue")
+        #expect(isInteger(whole.currency["base"]), "base is an integer in Node-written data")
+        #expect(isInteger(whole.price["amount"]), "whole amount is integerValue")
+        #expect(isInteger(whole.quota["limit"]), "whole limit is integerValue")
+
+        let fractional = try fields(encode(amount: 29.5, limit: 0.5))
+        #expect(fractional.price["amount"] is Double)
+        #expect(fractional.quota["limit"] is Double)
+    }
+
+    @Test("integer-valued Node numbers decode into the Double fields")
+    func decodesIntegerNumbers() throws {
+        let doc = nodeDocument() // amount: 2900, limit: 100 (Int literals), base/digits ints
+        let model = try FirestoreDecoder().decode(PlanModel.self, from: doc)
+        #expect(model.prices[0].price.amount == 2900)
+        #expect(model.features[0].quota.limit == 100)
+        #expect(model.prices[0].price.currency.digits == 2)
+    }
+
+    @Test("Int64-backed integerValues (what the Firestore client returns) decode too")
+    func decodesInt64Numbers() throws {
+        var doc = nodeDocument()
+        var price = try #require((doc["prices"] as? [[String: Any]])?.first)
+        var inner = try #require(price["price"] as? [String: Any])
+        inner["amount"] = Int64(2900)
+        price["price"] = inner
+        doc["prices"] = [price]
+        doc["features"] = [["featureId": "feature-1", "quota": ["unit": "count", "limit": Int64(100)]] as [String: Any]]
+        let model = try FirestoreDecoder().decode(PlanModel.self, from: doc)
+        #expect(model.prices[0].price.amount == 2900)
+        #expect(model.features[0].quota.limit == 100)
+    }
 }

@@ -44,11 +44,12 @@ struct CreatePlanUseCase: UseCase {
             features: features
         )
 
-        // SKU uniqueness. The pinned FirebaseAPI cannot query inside a transaction
-        // (roadmap §7, S05), so this is a plain read just before the insert: a
-        // concurrent create of the same SKU in that window is not detected.
+        // SKU uniqueness: marker `get` inside the transaction (reads precede the
+        // insert), which also reserves the SKU on insert; the repository falls back
+        // to a direct query for legacy plans. Queries cannot run inside a
+        // transaction with the pinned FirebaseAPI (roadmap §7, S05).
         let repository = repositoryFactory(context)
-        if try await repository.fetch(bySKU: sku) != nil {
+        if try await repository.isSKUTaken(sku) {
             throw PlanSKUAlreadyExistsError(sku: sku)
         }
         try await repository.insert(entity: plan)
