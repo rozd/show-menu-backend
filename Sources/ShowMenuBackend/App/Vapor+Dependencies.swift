@@ -62,17 +62,15 @@ extension Application {
 
         var firestore: Firestore<HTTP2ClientTransport.Posix> { get }
 
-        // MARK: Items
+        // MARK: Catalog
 
-        var itemMapper: ItemMapper { get }
-        var itemDataSourceFactory: DataSourceFactory<ItemModel> { get }
-        var itemRepositoryFactory: RepositoryFactory<any ItemRepository> { get }
-        var createItemUseCaseFactory: UseCaseFactory<CreateItemUseCase> { get }
-        var updateItemUseCaseFactory: UseCaseFactory<UpdateItemUseCase> { get }
-        var getItemQueryHandler: GetItemQueryHandler { get }
-        var listItemsQueryHandler: ListItemsQueryHandler { get }
-        var createItemCommandHandler: CreateItemCommandHandler { get }
-        var updateItemCommandHandler: UpdateItemCommandHandler { get }
+        var featureMapper: FeatureMapper { get }
+        var featureDataSourceFactory: DataSourceFactory<FeatureModel> { get }
+        var featureRepositoryFactory: RepositoryFactory<any FeatureRepository> { get }
+        var createFeatureUseCaseFactory: UseCaseFactory<CreateFeatureUseCase> { get }
+        var updateFeatureUseCaseFactory: UseCaseFactory<UpdateFeatureUseCase> { get }
+        var createFeatureCommandHandler: CreateFeatureCommandHandler { get }
+        var updateFeatureCommandHandler: UpdateFeatureCommandHandler { get }
 
         // USER_LIFECYCLE_BEGIN
         // MARK: IAM
@@ -208,7 +206,7 @@ extension Application {
                 let path = firestorePrefix(FirestoreIdempotencyStore.defaultCollection)
                 let ttl = idempotencyConfiguration.ttl
                 return { [logger = app.logger] ctx in
-                    // Sibling force-cast pattern in CompositionRoot+Items.swift / +IAM.swift;
+                    // Sibling force-cast pattern in CompositionRoot+Catalog.swift / +IAM.swift;
                     // the Firestore idempotency store requires the production FirestoreTransaction.
                     guard let txn = ctx.transaction as? FirestoreTransaction else {
                         preconditionFailure(

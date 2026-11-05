@@ -14,7 +14,10 @@ extension Timestamp {
     init(exact date: Date) {
         let interval = date.timeIntervalSince1970
         var seconds = interval.rounded(.down)
-        var nanos = ((interval - seconds) * 1_000_000_000).rounded()
+        // Round to whole microseconds (Firestore's own precision): a Double near 1.7e9 s only
+        // resolves ~0.24 µs, so without this a ms-aligned JS date (…123 ms) drifts to
+        // …122_999_907 ns and a later ms-floor (Node `toDate()`) shows …122.
+        var nanos = ((interval - seconds) * 1_000_000).rounded() * 1_000
         if nanos >= 1_000_000_000 {
             seconds += 1
             nanos = 0

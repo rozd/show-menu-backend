@@ -35,14 +35,13 @@ func routes(_ app: Application) throws {
     // TODO(S05): replace the `GET /plans` stub with ListPlans; keep the catch-all.
     try admin.register(collection: PlansGuardRouteV1())
 
-    // Items (sample module). Conservative: authenticated (was public); removed in S04.
-    let itemController = ItemController(
-        getItemQueryHandler: app.deps.getItemQueryHandler,
-        listItemsQueryHandler: app.deps.listItemsQueryHandler,
-        createItemCommandHandler: app.deps.createItemCommandHandler,
-        updateItemCommandHandler: app.deps.updateItemCommandHandler
+    // Catalog: `POST/PUT /plans/features` are admin-only. Registered after the
+    // guard collection; the explicit routes win over its `/plans/**` catch-all.
+    let featureController = FeatureController(
+        createFeatureCommandHandler: app.deps.createFeatureCommandHandler,
+        updateFeatureCommandHandler: app.deps.updateFeatureCommandHandler
     )
-    try authenticated.register(collection: ItemRouteV1(controller: itemController))
+    try admin.register(collection: FeatureRouteV1(controller: featureController))
 
     // USER_LIFECYCLE_BEGIN
     // IAM (Firebase Auth user lifecycle)
