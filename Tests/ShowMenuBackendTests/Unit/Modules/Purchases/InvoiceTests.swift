@@ -99,4 +99,27 @@ struct InvoiceTests {
         #expect(invoice.amount == 15)
         #expect(try invoice.checkoutRequest().subscription == nil)
     }
+
+    // MARK: Paid-invoice signals (S14)
+
+    @Test("unsubscribe / recordChargeFailure on a paid invoice keep the status and raise only their event")
+    func paidInvoiceSignals() throws {
+        let unsubscribed = try invoice(in: .paid)
+        #expect(try unsubscribed.unsubscribe() == true)
+        #expect(unsubscribed.status == .paid)
+        #expect(unsubscribed.pullEvents().map(\.kind) == [.invoiceUnsubscribed])
+
+        let failed = try invoice(in: .paid)
+        #expect(try failed.recordChargeFailure() == true)
+        #expect(failed.status == .paid)
+        #expect(failed.pullEvents().map(\.kind) == [.invoiceChargeFailed])
+    }
+
+    @Test("unsubscribe / recordChargeFailure on a non-paid invoice throw and record nothing", arguments: [InvoiceStatus.pending, .failed, .cancelled, .refunded])
+    func signalsNeedPaid(status: InvoiceStatus) throws {
+        let invoice = try invoice(in: status)
+        #expect(throws: InvalidStatusTransitionError.self) { try invoice.unsubscribe() }
+        #expect(throws: InvalidStatusTransitionError.self) { try invoice.recordChargeFailure() }
+        #expect(invoice.status == status && invoice.pullEvents().isEmpty)
+    }
 }

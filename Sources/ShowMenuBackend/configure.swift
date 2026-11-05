@@ -40,6 +40,9 @@ public func configure(_ app: Application) async throws {
     // Configure integration events
     await configureIntegrationEvents(app)
 
+    // Configure domain events (post-commit, in-process)
+    await configureDomainEvents(app)
+
     // register routes
     try routes(app)
 
@@ -79,6 +82,14 @@ private func configureIntegrationEvents(_ app: Application) async {
     await app.deps.integrationEventRegistry.register(AccountCreatedIntegrationEvent.self)
     await app.deps.integrationEventDispatcher.register(handler: app.deps.linkAccountOnAccountCreatedHandler)
     await app.deps.integrationEventDispatcher.register(handler: app.deps.grantOwnerPermissionOnAccountCreatedHandler)
+}
+
+// MARK: - Domain Events Configuration
+
+private func configureDomainEvents(_ app: Application) async {
+    // Subscriptions: the invoice events of the LiqPay callback (paid / renewed / failed /
+    // charge_failed / refunded / cancelled / unsubscribed) drive the subscription lifecycle.
+    await app.deps.domainEventDispatcher.register(handler: app.deps.subscriptionInvoiceEventHandler)
 }
 
 // MARK: - Debugging Helpers

@@ -144,6 +144,39 @@ final class Invoice: AggregateRoot, @unchecked Sendable {
         return true
     }
 
+    /// The customer ended the recurring subscription of a **paid** invoice (LiqPay
+    /// `unsubscribed`). The invoice FSM has no `paid -> cancelled` edge and does not gain one:
+    /// the status stays `paid` (the money was received) and only the semantic
+    /// `invoice.unsubscribed` event is raised, so the subscription can be cancelled (S14).
+    /// Returns `true` (the caller must persist, the Repository dispatches the event). Not `paid`
+    /// -> throws ``InvalidStatusTransitionError``.
+    @discardableResult
+    func unsubscribe(now: Date = .now) throws -> Bool {
+        try requirePaid(to: .cancelled)
+        updatedAt = now
+        record(event: .semantic(.invoiceUnsubscribed, aggregateId: id, occurredAt: now))
+        return true
+    }
+
+    /// A recurring charge failed for a **paid** invoice (LiqPay `failure|error` after the first
+    /// payment). Same shape as ``unsubscribe(now:)``: status unchanged, semantic
+    /// `invoice.charge_failed` raised (S14 suspends the subscription). Not `paid` -> throws.
+    @discardableResult
+    func recordChargeFailure(now: Date = .now) throws -> Bool {
+        try requirePaid(to: .failed)
+        updatedAt = now
+        record(event: .semantic(.invoiceChargeFailed, aggregateId: id, occurredAt: now))
+        return true
+    }
+
+    private func requirePaid(to target: InvoiceStatus) throws {
+        guard status == .paid else {
+            throw InvalidStatusTransitionError(
+                aggregate: "invoice", id: id.rawValue, from: status.rawValue, to: target.rawValue
+            )
+        }
+    }
+
     @discardableResult
     func fail(now: Date = .now) throws -> Bool {
         try move(to: .failed, event: .invoiceFailed, now: now)

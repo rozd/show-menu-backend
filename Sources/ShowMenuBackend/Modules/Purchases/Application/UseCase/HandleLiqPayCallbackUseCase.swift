@@ -12,10 +12,13 @@ import Logging
 /// invoice, the order, the session.
 ///
 /// * Unknown invoice -> logged, nothing written, success (LiqPay must not retry forever).
-/// * An invalid transition (e.g. a late `success` after `failure`, `unsubscribed` on a `paid`
+/// * An invalid transition (e.g. a late `success` after `failure`, `reversed` on a `pending`
 ///   invoice) never fails the callback: it is logged, the audit document is still written, and
 ///   the invoice, order and session are left exactly as they were (all-or-nothing, so the three
 ///   stay consistent).
+/// * On a `paid` invoice, `unsubscribed` and `failure|error` (a failed recurring charge) raise the
+///   semantic `invoice.unsubscribed` / `invoice.charge_failed` events (status unchanged; order and
+///   session untouched) so the Subscriptions module can cancel / suspend (S14).
 /// * A repeated status is a no-op (S10); a further `success|subscribed` for a `paid` invoice
 ///   with a *new* payment is a subscription renewal: `Invoice.renew` raises `invoice.renewed`.
 /// * In-flight statuses (`processing`, `wait_*`, ...) change no aggregate; they refresh a
@@ -72,6 +75,9 @@ struct HandleLiqPayCallbackUseCase: UseCase {
         var invoiceChanged = false
         var orderChanged = false
         var rejected = false
+        // A failed recurring charge / an unsubscribe on a PAID invoice does not touch the order
+        // or the (successful) session: only the invoice event is raised (S14).
+        var leaveSession = false
         if let target = PaymentStatusMapping.invoiceTarget(for: payload.status) {
             do {
                 let reference = payload.paymentReference
@@ -84,11 +90,21 @@ struct HandleLiqPayCallbackUseCase: UseCase {
                     }
                     orderChanged = try order?.complete(invoiceId: invoice.id) ?? false
                 case .failed:
-                    invoiceChanged = try invoice.fail()
-                    orderChanged = try order?.fail(invoiceId: invoice.id) ?? false
+                    if invoice.status == .paid {
+                        invoiceChanged = try invoice.recordChargeFailure()
+                        leaveSession = true
+                    } else {
+                        invoiceChanged = try invoice.fail()
+                        orderChanged = try order?.fail(invoiceId: invoice.id) ?? false
+                    }
                 case .cancelled:
-                    invoiceChanged = try invoice.cancel()
-                    orderChanged = try order?.cancel(invoiceId: invoice.id) ?? false
+                    if invoice.status == .paid {
+                        invoiceChanged = try invoice.unsubscribe()
+                        leaveSession = true
+                    } else {
+                        invoiceChanged = try invoice.cancel()
+                        orderChanged = try order?.cancel(invoiceId: invoice.id) ?? false
+                    }
                 case .refunded:
                     invoiceChanged = try invoice.refund()
                     orderChanged = try order?.refund() ?? false
@@ -114,7 +130,7 @@ struct HandleLiqPayCallbackUseCase: UseCase {
         if invoiceChanged { try await invoiceRepository.update(entity: invoice) }
         if orderChanged, let order { try await orderRepository.update(entity: order) }
 
-        guard !rejected else { return }
+        guard !rejected, !leaveSession else { return }
         guard let sessionModel else {
             logger.notice("Checkout session not found, nothing to update", metadata: metadata)
             return

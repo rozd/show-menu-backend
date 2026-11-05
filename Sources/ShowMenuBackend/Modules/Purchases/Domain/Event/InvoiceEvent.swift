@@ -13,6 +13,10 @@ enum InvoiceEventKind: String, LifecycleEventKind {
     case invoiceRefunded = "invoice.refunded"
     /// A further payment arrived for an already-paid invoice (a subscription renewal, S13).
     case invoiceRenewed = "invoice.renewed"
+    /// The customer ended the LiqPay subscription of an already-paid invoice (S14).
+    case invoiceUnsubscribed = "invoice.unsubscribed"
+    /// A recurring charge failed for an already-paid invoice (S14).
+    case invoiceChargeFailed = "invoice.charge_failed"
 
     static let created: InvoiceEventKind = .invoiceCreated
     static let updated: InvoiceEventKind = .invoiceUpdated

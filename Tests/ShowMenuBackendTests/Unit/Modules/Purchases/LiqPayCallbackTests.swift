@@ -258,7 +258,7 @@ struct LiqPayCallbackTests {
         #expect(!eventKinds(sut).contains("invoice.paid"))
     }
 
-    @Test("unsubscribed on a paid invoice is an invalid edge: acknowledged, nothing changes")
+    @Test("unsubscribed on a paid invoice: status unchanged, invoice.unsubscribed raised, order and session untouched")
     func unsubscribedOnPaid() async throws {
         let sut = try await makeSUT(sessionStatus: .success) { order, invoice in
             try invoice.pay(transactionId: "tx-1")
@@ -267,7 +267,20 @@ struct LiqPayCallbackTests {
         try await deliver(sut, payload(sut, status: "unsubscribed"))
         let s = try await state(sut)
         #expect(s.invoice == .paid && s.order == .completed && s.session == .success)
+        #expect(eventKinds(sut) == ["invoice.unsubscribed"])
         #expect(await sut.audit.rows.count == 1)
+    }
+
+    @Test("a failed recurring charge on a paid invoice: invoice.charge_failed raised, nothing else changes", arguments: ["failure", "error"])
+    func failureOnPaid(status: String) async throws {
+        let sut = try await makeSUT(sessionStatus: .success) { order, invoice in
+            try invoice.pay(transactionId: "tx-1")
+            try order.complete(invoiceId: invoice.id)
+        }
+        try await deliver(sut, payload(sut, status: status, paymentId: "pay-2"))
+        let s = try await state(sut)
+        #expect(s.invoice == .paid && s.order == .completed && s.session == .success)
+        #expect(eventKinds(sut) == ["invoice.charge_failed"])
     }
 
     @Test("an order that cannot follow the invoice keeps both unchanged (all-or-nothing)")
