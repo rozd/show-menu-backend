@@ -51,7 +51,7 @@ swift run Run
 ```bash
 curl http://localhost:8080/health   # → OK
 curl http://localhost:8080/version  # → 0.0.1
-curl http://localhost:8080/v1/items # → []
+curl http://localhost:8080/api/v1/echo/hello # → "Hello from ShowMenuBackend!"
 ```
 
 ## Environment Variables
@@ -233,7 +233,7 @@ SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --form
 
 curl $SERVICE_URL/health   # → OK
 curl $SERVICE_URL/version  # → 0.0.1
-curl $SERVICE_URL/v1/items # → []
+curl $SERVICE_URL/api/v1/echo/hello # → "Hello from ShowMenuBackend!"
 ```
 
 For details on how the Cloud Build pipeline works and production tuning, see [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md#cloud-build-pipeline).

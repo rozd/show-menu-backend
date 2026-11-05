@@ -32,8 +32,8 @@ struct StubUnitOfWorkContext: UnitOfWorkContext {
 /// let spy = SpyDomainEventDispatcher()
 /// let uow = StubUnitOfWork(dispatcher: spy)
 /// try await uow.execute { ctx in
-///     let repo = ItemRepository(context: ctx, dataSource: ds)
-///     try await repo.insert(entity: item)
+///     let repo = FeatureRepository(context: ctx, dataSource: ds)
+///     try await repo.insert(entity: feature)
 /// }
 /// // assert on uow.dispatchedEvents, spy.dispatchedEvents, or uow.committedOutbox
 /// ```

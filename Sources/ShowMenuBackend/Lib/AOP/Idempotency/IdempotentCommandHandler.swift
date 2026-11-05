@@ -52,7 +52,7 @@ protocol IdempotentCommandHandler: CommandHandler where Result: Codable {
     ///
     /// Defaults to the command's `payload`. **Caveat:** the record id is keyed on
     /// `(principalId, commandType, key)`, so identity carried *outside* the
-    /// payload — e.g. a route/path parameter like `UpdateItemCommand.itemId` — is
+    /// payload — e.g. a route/path parameter like `UpdateFeatureCommand.featureId` — is
     /// **not** in the default fingerprint. A key reused with the same body but a
     /// different path parameter would then replay the wrong resource's response
     /// (silent wrong-data, not a 422). Well-behaved clients mint a fresh key per

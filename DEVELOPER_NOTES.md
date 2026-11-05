@@ -237,44 +237,44 @@ Located in `Tests/{APP_NAME}Tests/Support/`:
 Every UseCase test follows the `makeSUT()` pattern:
 
 ```swift
-@Suite("CreateItemUseCaseTests")
-struct CreateItemUseCaseTests {
+@Suite("FeatureUseCaseTests")
+struct FeatureUseCaseTests {
     private func makeSUT() -> (
-        ds: InMemoryDataSource<ItemModel>,
+        ds: InMemoryDataSource<FeatureModel>,
         collector: InMemoryDomainEventCollector,
         context: StubUnitOfWorkContext
     ) {
-        let ds = InMemoryDataSource<ItemModel>(id: { $0.id })
+        let ds = InMemoryDataSource<FeatureModel>(id: { $0.id })
         let collector = InMemoryDomainEventCollector()
         let context = StubUnitOfWorkContext(transaction: "stub", collector: collector)
         return (ds, collector, context)
     }
 
     private func makeRepoFactory(
-        ds: InMemoryDataSource<ItemModel>
-    ) -> RepositoryFactory<any ItemRepository> {
+        ds: InMemoryDataSource<FeatureModel>
+    ) -> RepositoryFactory<any FeatureRepository> {
         { ctx in
-            FirestoreItemRepository(
-                mapper: ItemMapper(),
+            FirestoreFeatureRepository(
+                mapper: FeatureMapper(),
                 dataSourceFactory: { _, _ in ds },
                 context: ctx
             )
         }
     }
 
-    @Test("creates item with valid input")
+    @Test("creates feature with valid input")
     func happyPath() async throws {
         let (ds, collector, context) = makeSUT()
-        let sut = CreateItemUseCase(
+        let sut = CreateFeatureUseCase(
             context: context,
             repositoryFactory: makeRepoFactory(ds: ds),
-            mapper: ItemMapper(),
+            mapper: FeatureMapper(),
             logger: Logger(label: "test")
         )
 
-        let result = try await sut.execute(params: .init(name: "Test", description: nil))
+        let result = try await sut.execute(params: .init(category: "ai", name: ["en": "Test"], description: nil))
 
-        #expect(result.name == "Test")
+        #expect(result.name == ["en": "Test"])
         let inserted = await ds.insertedModels
         #expect(inserted.count == 1)
     }

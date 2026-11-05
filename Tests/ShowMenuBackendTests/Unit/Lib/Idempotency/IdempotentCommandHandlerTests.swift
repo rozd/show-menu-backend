@@ -49,7 +49,7 @@ private final class SpyCommandHandler: IdempotentCommandHandler, @unchecked Send
 // MARK: - Fixtures for the overridable `fingerprint(for:)` hook
 
 /// A command carrying identity *outside* its payload (mirrors how
-/// `UpdateItemCommand.itemId` is a route parameter, not a payload field).
+/// `UpdateFeatureCommand.featureId` is a route parameter, not a payload field).
 private struct ScopedCommand: Command {
     struct Payload: Codable, Sendable, Equatable {
         let value: String

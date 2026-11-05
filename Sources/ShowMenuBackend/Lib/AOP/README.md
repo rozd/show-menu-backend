@@ -23,7 +23,7 @@ Principal-aware authorization primitives — the `*Ability` / `*Voter` conventio
 Inbound command de-duplication keyed on the client's `Idempotency-Key` header — a retry replays the first response instead of re-running the work. Implemented as a `CommandHandler`-refining protocol (conform to opt in) whose reserve/replay/store run **inside the command's own transaction**, so the de-duplication record and the command's writes commit atomically. The concrete store binding lives in `Integration/Firestore/`; the edge extraction in `Integration/Vapor/`.
 
 - `IdempotencyKey` — validated header value type (request metadata, not a DTO field).
-- `RequestFingerprint` — SHA-256 of the canonical payload; detects same-key-different-body misuse. Scope defaults to `command.payload`; a handler overrides `IdempotentCommandHandler.fingerprint(for:)` to fold in identity carried outside the payload (e.g. a route parameter like `itemId`).
+- `RequestFingerprint` — SHA-256 of the canonical payload; detects same-key-different-body misuse. Scope defaults to `command.payload`; a handler overrides `IdempotentCommandHandler.fingerprint(for:)` to fold in identity carried outside the payload (e.g. a route parameter like `featureId`).
 - `IdempotencyRecord` / `StoredResponse` / `IdempotencyStatus` — the persisted record + captured response; `IdempotencyReservation` / `IdempotencyTicket` are the read-phase outcome and the proceed-token threaded to the write phase.
 - `IdempotencyStore` — read-phase `reserve` + write-phase `complete` (the split honours Firestore's no-read-after-write rule).
 - `IdempotencyConfiguration` — `IdempotencyScope` (default `actorAndCommandType`), TTL, `InFlightStrategy` (default `rejectConflict`).
