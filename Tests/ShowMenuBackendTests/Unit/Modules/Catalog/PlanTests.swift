@@ -100,24 +100,36 @@ struct PlanAggregateTests {
 struct CreatePlanUseCaseTests {
     let mapper = PlanMapper()
 
+    /// `ds` = `plans`, `skus` = `plan_skus` markers.
     private func makeSUT() -> (
         ds: InMemoryDataSource<PlanModel>,
+        skus: InMemoryDataSource<PlanSKUModel>,
         collector: InMemoryDomainEventCollector,
         context: StubUnitOfWorkContext
     ) {
         let ds = InMemoryDataSource<PlanModel>(id: { $0.id }, matchesFilter: { model, filter in
             filter.field == "SKU" && filter.op == .equal && (filter.value as? String) == model.SKU
         })
+        let skus = InMemoryDataSource<PlanSKUModel>(id: { $0.id })
         let collector = InMemoryDomainEventCollector()
-        return (ds, collector, StubUnitOfWorkContext(transaction: "stub", collector: collector))
+        return (ds, skus, collector, StubUnitOfWorkContext(transaction: "stub", collector: collector))
     }
 
-    private func makeUseCase(_ ds: InMemoryDataSource<PlanModel>, _ ctx: StubUnitOfWorkContext) -> CreatePlanUseCase {
+    private func makeUseCase(
+        _ ds: InMemoryDataSource<PlanModel>,
+        _ skus: InMemoryDataSource<PlanSKUModel>,
+        _ ctx: StubUnitOfWorkContext
+    ) -> CreatePlanUseCase {
         let mapper = self.mapper
         return CreatePlanUseCase(
             context: ctx,
             repositoryFactory: { ctx in
-                FirestorePlanRepository(mapper: mapper, dataSourceFactory: { _, _ in ds }, context: ctx)
+                FirestorePlanRepository(
+                    mapper: mapper,
+                    dataSourceFactory: { _, _ in ds },
+                    skuDataSourceFactory: { _, _ in skus },
+                    context: ctx
+                )
             },
             mapper: mapper,
             logger: Logger(label: "test", factory: { _ in CapturingLogHandler() })
@@ -145,8 +157,8 @@ struct CreatePlanUseCaseTests {
 
     @Test("happy path: DTO in Node's shape, one model, lifecycle + semantic events")
     func happyPath() async throws {
-        let (ds, collector, ctx) = makeSUT()
-        let dto = try await makeUseCase(ds, ctx).execute(params: .init(payload: payload()))
+        let (ds, skus, collector, ctx) = makeSUT()
+        let dto = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload()))
 
         #expect(dto.id.hasPrefix("plan-"))
         #expect(dto.SKU == "SKU-1")
@@ -162,27 +174,56 @@ struct CreatePlanUseCaseTests {
         #expect(kinds.contains(.created))
     }
 
-    @Test("a duplicate SKU throws PlanSKUAlreadyExistsError (409) and inserts nothing")
-    func duplicateSKU() async throws {
-        let (ds, _, ctx) = makeSUT()
-        _ = try await makeUseCase(ds, ctx).execute(params: .init(payload: payload()))
-        #expect(await ds.insertedModels.count == 1)
+    @Test("create reserves the SKU: a plan_skus marker is written with the plan")
+    func reservesMarker() async throws {
+        let (ds, skus, _, ctx) = makeSUT()
+        let dto = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload(sku: "A/b")))
+        let marker = try #require(await skus.insertedModels.first)
+        #expect(marker.id == PlanSKUModel.documentId(for: "A/b"))
+        #expect(!marker.id.contains("/"))
+        #expect(marker.sku == "A/b" && marker.planId == dto.id)
+        #expect(PlanSKUModel.documentId(for: "A") != PlanSKUModel.documentId(for: "a"))
+    }
+
+    @Test("a taken marker → PlanSKUAlreadyExistsError (409), nothing inserted")
+    func duplicateViaMarker() async throws {
+        let (ds, skus, _, ctx) = makeSUT()
+        _ = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload()))
+        // A second create sees the marker even if the plan doc were not visible.
+        await ds.reset()
 
         await #expect(throws: PlanSKUAlreadyExistsError(sku: "SKU-1")) {
-            try await makeUseCase(ds, ctx).execute(params: .init(payload: payload()))
+            try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload()))
         }
-        #expect(await ds.insertedModels.count == 1) // only the first create
-        // The check is a query on the unit-of-work data source, filtered by SKU.
+        #expect(await ds.insertedModels.isEmpty)
+        #expect(await skus.insertedModels.count == 1)
+        #expect(await ds.queries.isEmpty) // answered by the marker, no query needed
+        #expect(HTTPErrorMapping.map(PlanSKUAlreadyExistsError(sku: "x")).status.code == 409)
+    }
+
+    @Test("a legacy plan without a marker is caught by the SKU query backstop")
+    func duplicateViaLegacyQuery() async throws {
+        let (ds, skus, _, ctx) = makeSUT()
+        let legacy = try Plan.create(
+            SKU: "SKU-1", name: LocalizedString(["en": "x"]), description: LocalizedString(["en": "x"]),
+            isActive: true, prices: try samplePrices(), features: sampleFeatures()
+        )
+        await ds.seed(mapper.toModel(entity: legacy))
+
+        await #expect(throws: PlanSKUAlreadyExistsError(sku: "SKU-1")) {
+            try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload()))
+        }
         let filter = try #require(await ds.queries.last?.filters.first)
         #expect(filter.field == "SKU" && filter.op == .equal)
-        #expect(HTTPStatusHintTable.status(of: PlanSKUAlreadyExistsError(sku: "x")) == 409)
+        #expect(await ds.insertedModels.isEmpty)
+        #expect(await skus.insertedModels.isEmpty)
     }
 
     @Test("a different SKU is not a duplicate")
     func differentSKU() async throws {
-        let (ds, _, ctx) = makeSUT()
-        _ = try await makeUseCase(ds, ctx).execute(params: .init(payload: payload(sku: "A")))
-        _ = try await makeUseCase(ds, ctx).execute(params: .init(payload: payload(sku: "B")))
+        let (ds, skus, _, ctx) = makeSUT()
+        _ = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload(sku: "A")))
+        _ = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: payload(sku: "B")))
         #expect(await ds.insertedModels.count == 2)
     }
 
@@ -191,7 +232,7 @@ struct CreatePlanUseCaseTests {
             "sku", "prices", "features", "duration", "unit", "dupDurations", "dupFeatures", "amount",
           ])
     func validation(case name: String) async throws {
-        let (ds, _, ctx) = makeSUT()
+        let (ds, skus, _, ctx) = makeSUT()
         let price = { (d: String, a: Double) in
             CreatePlanCommand.PriceInput(price: PriceDTO(currencyName: "USD", amount: a), duration: d)
         }
@@ -209,7 +250,7 @@ struct CreatePlanUseCaseTests {
         default: payload(prices: [price("monthly", 0)])
         }
         do {
-            _ = try await makeUseCase(ds, ctx).execute(params: .init(payload: p))
+            _ = try await makeUseCase(ds, skus, ctx).execute(params: .init(payload: p))
             Issue.record("expected a ValidationError")
         } catch {
             #expect(error is any ValidationError, "got \(error)")

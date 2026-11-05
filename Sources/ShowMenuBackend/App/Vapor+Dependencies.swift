@@ -73,6 +73,7 @@ extension Application {
         var updateFeatureCommandHandler: UpdateFeatureCommandHandler { get }
         var planMapper: PlanMapper { get }
         var planDataSourceFactory: DataSourceFactory<PlanModel> { get }
+        var planSKUDataSourceFactory: DataSourceFactory<PlanSKUModel> { get }
         var planRepositoryFactory: RepositoryFactory<any PlanRepository> { get }
         var createPlanUseCaseFactory: UseCaseFactory<CreatePlanUseCase> { get }
         var createPlanCommandHandler: CreatePlanCommandHandler { get }
