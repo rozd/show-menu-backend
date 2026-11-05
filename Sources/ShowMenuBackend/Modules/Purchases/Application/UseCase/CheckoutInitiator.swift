@@ -51,7 +51,15 @@ struct CheckoutInitiator: Sendable {
             logger.error("Checkout failed", metadata: [
                 "invoiceId": .string(invoiceId), "error": .string(String(describing: error))
             ])
-            try await recordFailure(accountId: accountId, invoiceId: invoiceId, error: error)
+            // The gateway error is what the client must see; a failure to record it
+            // is logged, not surfaced (the session stays pending until S12 cancel).
+            do {
+                try await recordFailure(accountId: accountId, invoiceId: invoiceId, error: error)
+            } catch let recordError {
+                logger.error("Recording checkout failure failed", metadata: [
+                    "invoiceId": .string(invoiceId), "error": .string(String(describing: recordError))
+                ])
+            }
             throw error
         }
         try await recordPage(accountId: accountId, invoiceId: invoiceId, url: url)
