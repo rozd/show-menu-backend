@@ -62,7 +62,8 @@ extension Application.CompositionRoot {
                 FirestorePlanRepository(
                     mapper: planMapper,
                     dataSourceFactory: planDataSourceFactory,
-                    context: ctx
+                    context: ctx,
+                    lookupTransaction: { [firestore] in FirestoreTransaction.direct(firestore: firestore) }
                 )
             }
         }

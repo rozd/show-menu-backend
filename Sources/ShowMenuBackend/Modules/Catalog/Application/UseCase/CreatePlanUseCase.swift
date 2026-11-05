@@ -44,10 +44,9 @@ struct CreatePlanUseCase: UseCase {
             features: features
         )
 
-        // SKU uniqueness: a query on the unit-of-work transaction (reads precede
-        // the insert). Firestore commit-time contention on the read set makes the
-        // transaction runner retry, so concurrent duplicate creates are serialised
-        // against the queried range.
+        // SKU uniqueness. The pinned FirebaseAPI cannot query inside a transaction
+        // (roadmap §7, S05), so this is a plain read just before the insert: a
+        // concurrent create of the same SKU in that window is not detected.
         let repository = repositoryFactory(context)
         if try await repository.fetch(bySKU: sku) != nil {
             throw PlanSKUAlreadyExistsError(sku: sku)
