@@ -45,9 +45,11 @@ struct HandleLiqPayCallbackUseCase: UseCase {
 
         // MARK: Reads
 
-        // A document id cannot contain `/`; such an `order_id` cannot be ours.
+        // Only our own invoice ids (`invoice-<uuid>`, Node and Vapor alike) are looked up.
+        // Anything else (`/`, `.`/`..`, `__x__`, oversized) is not a valid document id
+        // and would otherwise surface as a 500 that LiqPay retries forever.
         let invoiceRepository = invoiceRepositoryFactory(context)
-        guard !payload.orderId.contains("/"),
+        guard Self.isInvoiceDocumentId(payload.orderId),
               let invoice = try await invoiceRepository.fetch(byId: Invoice.Id(rawValue: payload.orderId))
         else {
             logger.warning("LiqPay callback for an unknown invoice, acknowledged without changes", metadata: metadata)
@@ -129,5 +131,12 @@ struct HandleLiqPayCallbackUseCase: UseCase {
                 CheckoutSessionError(code: $0, message: payload.errorDescription, details: payload.info)
             }
         )))
+    }
+}
+
+extension HandleLiqPayCallbackUseCase {
+    /// `invoice-` prefix, no `/`, and within Firestore's 1500-byte document-id limit.
+    static func isInvoiceDocumentId(_ id: String) -> Bool {
+        id.hasPrefix(Invoice.Id.prefix) && !id.contains("/") && id.utf8.count <= 1500
     }
 }
