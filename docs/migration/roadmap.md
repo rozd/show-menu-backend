@@ -363,7 +363,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 ## 6. Progress checklist
 - [x] S01 Local loop / `/api` / Echo / CI
 - [x] S02 Error contract and shared kernel
-- [ ] S03 Authentication and admin guard
+- [x] S03 Authentication and admin guard
 - [ ] S04 Catalog: Features (+ remove Items)
 - [ ] S05 Plans: create, get, list
 - [ ] S06 Plans: mutations
@@ -406,6 +406,16 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - **S02:** FirebaseAPI `Timestamp(_ date:)` truncates sub-seconds and `Date(timestamp:)` divides nanos by 1e6 (bug). Use `Timestamp(exact:)` / `.asDate` from `Integration/Firestore/Firestore+Timestamp.swift` in new models.
 - **S02:** `Currency` encodes absent `symbol/base/digits` as explicit `null` (Node shape); whether the Firestore encoder writes `null` for them is unverified until a model stores it (S04/S05 mapper round-trip).
 - **S02:** `Price.amount` is `Double`; `PrefixedEntityId` protocol gives `generate()` = `prefix + lowercase uuid`. Value objects live in `Modules/Shared/Domain`, `PriceDTO` in `Modules/Shared/Application/DTO`.
+
+### Decisions taken (S03)
+- **S03:** Added `vapor/jwt` (`JWT` product, `from: 5.1.0`) to `Package.swift`; `Package.resolved` changed accordingly.
+- **S03:** Admin = top-level `admin: true` claim (`FirebaseIDToken.admin`); `FirebasePrincipal` (`Integration/Firebase/FirebaseBearerAuthenticator.swift`) maps it to the existing `Role.admin` (declared in IAM's `AdminRoleVoter.swift`). No `role` claim (fitnessart's) is read.
+- **S03:** Route groups in `routes.swift`: `publicRoutes` (= `api`; echo), `authenticated` (`FirebaseAuthMiddleware`: any valid token), `admin` (authenticated + `RequireAdminMiddleware`). `FirebaseAuthMiddleware` replaces fitnessart's Authenticator + guard pair: it throws `Abort(.unauthorized)` itself and binds `RequestContext.$principal` around `next`. Missing/invalid/expired/wrong-aud/iss → 401; non-admin → 403 (`AuthorizationError.denied`); `RequireAdminMiddleware` with no principal → 401. All via the S02 envelope.
+- **S03:** Existing **Items and IAM (`/users`) routes moved to `authenticated`** (any valid token, not admin; previously public). Conservative choice; Items is deleted in S04. Later modules must register on `authenticated`/`admin`, not `api`, unless deliberately public.
+- **S03:** Vapor skips group middleware when no route matches, so Node's "401/403 for unmatched `/plans/*`" is reproduced by `PlansGuardRouteV1` (`Integration/Vapor/`): `GET /plans` → `[]` stub plus a guarded catch-all `/plans/**` → 404 (admins). S05 replaces the stub but must keep the catch-all (or an equivalent guard) until the real routes cover the harness paths.
+- **S03:** `CommandMetadata(req:)` now takes `userId` from `RequestContext.principal?.id` (nil on public routes). It relies on being called inside the middleware's task-local scope, i.e. within a handler.
+- **S03:** The verifier is built lazily by `app.firebaseTokenVerifier` (`FirebaseTokenVerifier+Vapor.swift`) from `app.gcp`; unsigned tokens accepted only when `gcp.config.environment.isEmulator`. JWKS is cached by `Cache-Control: max-age` (default 1h). The signed (JWKS/RS256) path is unit-tested only with a fixed HMAC key collection; it has not been run against Google's live JWKS.
+- **S03:** Harness `auth-rbac`: all 4 cases pass (401 no header, 401 invalid token, 403 regular user, admin not 401/403). `smoke` 2/2 pass.
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.
