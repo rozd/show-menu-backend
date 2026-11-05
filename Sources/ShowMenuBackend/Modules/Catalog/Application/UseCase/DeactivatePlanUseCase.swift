@@ -1,7 +1,7 @@
 import Foundation
 import Logging
 
-/// Idempotent: deactivateing a plan that is already in the target state is a no-op
+/// Idempotent: deactivating a plan that is already in the target state is a no-op
 /// for the aggregate (no semantic event, `updatedAt` kept) and still succeeds.
 struct DeactivatePlanUseCase: UseCase {
     struct Params: Sendable {
