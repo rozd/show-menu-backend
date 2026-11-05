@@ -4,9 +4,9 @@
 ///
 /// Usage:
 /// ```swift
-/// let ds = InMemoryDataSource<ItemModel>(id: { $0.id })
-/// await ds.seed(ItemModel(id: "i1", name: "Widget"))
-/// let result = try await ds.fetch(byId: "i1")
+/// let ds = InMemoryDataSource<FeatureModel>(id: { $0.id })
+/// await ds.seed(FeatureModel(id: "feature-1", category: .ai, name: name, description: nil, version: nil, createdAt: ts, updatedAt: ts))
+/// let result = try await ds.fetch(byId: "feature-1")
 /// ```
 actor InMemoryDataSource<Model: Sendable>: QueryableDataSource {
 

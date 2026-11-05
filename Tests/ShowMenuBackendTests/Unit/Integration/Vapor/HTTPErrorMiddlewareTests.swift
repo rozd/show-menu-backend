@@ -12,11 +12,11 @@ struct HTTPErrorMiddlewareTests {
     private struct Unknown: Error {}
 
     @Test("mapping table", arguments: [
-        (ApplicationError.notFound(entity: "Item", id: Item.Id(rawValue: "x")) as any Error, 404, "not_found"),
+        (ApplicationError.notFound(entity: "Feature", id: Feature.Id(rawValue: "x")) as any Error, 404, "not_found"),
         (ApplicationError.invalidInput(reason: "bad") as any Error, 422, "validation_failed"),
         (SomeValidationError() as any Error, 422, "validation_failed"),
         (SomeDomainError() as any Error, 409, "domain_rule_violation"),
-        (ConcurrencyError.versionConflict(entity: "Item", id: "1", expected: .none, actual: .none) as any Error, 409, "version_conflict"),
+        (ConcurrencyError.versionConflict(entity: "Feature", id: "1", expected: .none, actual: .none) as any Error, 409, "version_conflict"),
         (AuthorizationError.denied(reason: "no") as any Error, 403, "forbidden"),
         (AuthorizationError.missingPrincipal as any Error, 401, "unauthorized"),
         (IdempotencyError.malformedKey("k") as any Error, 400, "idempotency_key_invalid"),
