@@ -10,18 +10,16 @@ import FirestoreAPI
 
 extension Timestamp {
 
-    /// Exact conversion, preserving sub-second precision (floor semantics, nanos in 0..<1e9).
+    /// Millisecond-precise conversion, matching Node's `Timestamp.fromDate` (a JS `Date` has
+    /// millisecond precision; sub-millisecond digits are floored). Nanos are in 0..<1e9.
     init(exact date: Date) {
-        let interval = date.timeIntervalSince1970
-        var seconds = interval.rounded(.down)
-        // Round to whole microseconds (Firestore's own precision): a Double near 1.7e9 s only
-        // resolves ~0.24 µs, so without this a ms-aligned JS date (…123 ms) drifts to
-        // …122_999_907 ns and a later ms-floor (Node `toDate()`) shows …122.
-        var nanos = ((interval - seconds) * 1_000_000).rounded() * 1_000
-        if nanos >= 1_000_000_000 {
-            seconds += 1
-            nanos = 0
-        }
+        // Snap to whole microseconds first: a Double near 1.7e9 s only resolves ~0.24 µs, so a
+        // ms-aligned date (…123 ms) may read back as …122.9999 ms and a bare floor would drift
+        // it down by 1 ms.
+        let micros = (date.timeIntervalSince1970 * 1_000_000).rounded()
+        let millis = (micros / 1_000).rounded(.down)
+        let seconds = (millis / 1_000).rounded(.down)
+        let nanos = (millis - seconds * 1_000) * 1_000_000
         self.init(seconds: Int64(seconds), nanos: Int32(nanos))
     }
 
