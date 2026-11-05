@@ -140,6 +140,8 @@ extension Application.CompositionRoot {
             { [logger = app.logger] ctx in
                 UserLinkAccountUseCase(
                     context: ctx,
+                    accountDataSourceFactory: accountDataSourceFactory,
+                    accountMapper: accountMapper,
                     repositoryFactory: userRepositoryFactory,
                     logger: logger
                 )

@@ -41,6 +41,8 @@ struct AccountCreatedFlowTests {
         let linkUseCase: UseCaseFactory<UserLinkAccountUseCase> = { ctx in
             UserLinkAccountUseCase(
                 context: ctx,
+                accountDataSourceFactory: { _, _ in accounts },
+                accountMapper: AccountMapper(),
                 repositoryFactory: { ctx in
                     FirestoreUserRepository(mapper: userMapper, dataSourceFactory: { _, _ in users }, context: ctx)
                 },
@@ -85,11 +87,37 @@ struct AccountCreatedFlowTests {
         }
     }
 
+    private func seedAccount(_ sut: SUT, id: String = "acc-1", creator: String = "u-1") async {
+        await sut.accounts.seed(AccountModel(id: id, name: "Cafe", creator: creator))
+    }
+
     // MARK: Link
+
+    @Test("link: uses the stored account's creator, not the event's")
+    func link_trustsStoredCreator() async throws {
+        let sut = makeSUT()
+        await seedAccount(sut, creator: "real-creator")
+
+        try await deliver(event(creator: "forged"), to: sut.link)
+
+        let inserted = try #require(await sut.users.insertedModels.first)
+        #expect(inserted.id == "real-creator")
+        #expect(inserted.accounts == ["acc-1"])
+        #expect(try await sut.users.fetch(byId: "forged") == nil)
+    }
+
+    @Test("link: a missing account is a no-op and writes nothing")
+    func link_missingAccount() async throws {
+        let sut = makeSUT()
+        try await deliver(event(), to: sut.link)
+        #expect(await sut.users.insertedModels.isEmpty)
+        #expect(await sut.users.updatedModels.isEmpty)
+    }
 
     @Test("link: appends the account to the creator's accounts")
     func link_appends() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
         await sut.users.seed(UserModel(id: "u-1", email: "a@example.com", accounts: ["old"], createdAt: nil))
 
         try await deliver(event(), to: sut.link)
@@ -103,6 +131,7 @@ struct AccountCreatedFlowTests {
     @Test("link: a missing user is upserted as a minimal profile holding the link")
     func link_missingUser() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
 
         try await deliver(event(), to: sut.link)
 
@@ -116,6 +145,7 @@ struct AccountCreatedFlowTests {
     @Test("link: an already linked account writes nothing")
     func link_alreadyLinked() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
         await sut.users.seed(UserModel(id: "u-1", accounts: ["acc-1"]))
 
         try await deliver(event(), to: sut.link)
@@ -127,6 +157,7 @@ struct AccountCreatedFlowTests {
     @Test("link: a redelivery of the same event is skipped by the inbox")
     func link_redeliverySkipped() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
         let evt = event()
 
         try await deliver(evt, to: sut.link)
@@ -143,6 +174,8 @@ struct AccountCreatedFlowTests {
     @Test("link: a different event for the same account is processed (not deduplicated by account)")
     func link_distinctEventProcessed() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
+        await sut.accounts.seed(AccountModel(id: "acc-2", name: "Bar", creator: "u-1"))
         try await deliver(event(account: "acc-1"), to: sut.link)
         try await deliver(event(account: "acc-2"), to: sut.link)
         let stored = try #require(try await sut.users.fetch(byId: "u-1"))
@@ -167,6 +200,7 @@ struct AccountCreatedFlowTests {
     @Test("onboarding completes the bare profile created by a link and keeps accounts")
     func onboarding_completesPlaceholder() async throws {
         let sut = makeSUT()
+        await seedAccount(sut)
         let logger = Logger(label: "test", factory: { _ in CapturingLogHandler() })
         try await deliver(event(), to: sut.link) // user doc did not exist yet
         let userMapper = UserMapper()
@@ -213,14 +247,11 @@ struct AccountCreatedFlowTests {
         #expect(docs.keys.sorted() == ["accounts/acc-1/permissions/real-creator"])
     }
 
-    @Test("grant: a missing account throws and writes nothing")
+    @Test("grant: a missing account is a logged no-op and writes no permission")
     func grant_missingAccount() async throws {
         let sut = makeSUT()
-        await #expect(throws: AccountNotFoundError.self) {
-            try await deliver(event(), to: sut.grant)
-        }
+        try await deliver(event(), to: sut.grant)
         #expect(await sut.permissions.writes == 0)
-        #expect(await sut.inbox.count == 0)
     }
 
     @Test("grant: a redelivery is skipped by the inbox")

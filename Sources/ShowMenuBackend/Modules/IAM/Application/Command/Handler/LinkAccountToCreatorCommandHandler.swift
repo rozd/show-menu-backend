@@ -12,10 +12,7 @@ struct LinkAccountToCreatorCommandHandler: InboxedCommandHandler {
             "correlationId": .stringConvertible(command.metadata.correlationId)
         ])
         try await useCaseFactory(ctx).execute(
-            params: .init(
-                userId: User.Id(rawValue: command.payload.creatorId),
-                accountId: command.payload.accountId
-            )
+            params: .init(accountId: command.payload.accountId)
         )
     }
 }

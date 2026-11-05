@@ -27,7 +27,12 @@ struct GrantAccountOwnerPermissionUseCase: UseCase {
 
         // Read first: the pinned Firestore client forbids reads after writes.
         guard let model = try await accountDataSourceFactory("", context.transaction).fetch(byId: params.accountId) else {
-            throw AccountNotFoundError(accountId: params.accountId)
+            // Permanent condition: throwing would make the transaction runner retry
+            // 5× for nothing. Log and commit without writes.
+            logger.warning("Account not found, skipping owner grant", metadata: [
+                "accountId": .string(params.accountId)
+            ])
+            return
         }
         let account = try accountMapper.toEntity(model: model)
 
