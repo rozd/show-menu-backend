@@ -367,7 +367,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - [x] S04 Catalog: Features (+ remove Items)
 - [x] S05 Plans: create, get, list
 - [x] S06 Plans: mutations
-- [ ] S07 Users onboarding, admin claim, webhook auth
+- [x] S07 Users onboarding, admin claim, webhook auth
 - [ ] S08 Accounts linking (firestore-forwarder)
 - [ ] S09 LiqPay client
 - [ ] S10 Purchases domain
@@ -381,7 +381,7 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - [ ] S18 Decommission
 
 ## 7. Open questions and decision log (fill in as you go)
-- Identity Platform upgrade on `show-menu-dev`, or claim set from Vapor? (S07)
+- **OPEN (user decision, S07):** Identity Platform upgrade on `show-menu-dev` (one-way), or claim set from Vapor via Identity Toolkit `accounts:update`? Finding: see S07 notes in §7. `identity-blocking` is built and tested either way.
 - Checkout-session status vocabulary as Flutter parses it. (S10)
 - Purchase when `users/{uid}` is missing: 404, or token-email fallback? (S11)
 - Cancel of a non-pending invoice: 409, or idempotent 200? (S12)
@@ -453,6 +453,13 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 
 ### Decisions taken (S07)
 - **S07 (Part 0, write-less transactions):** the pinned FirebaseAPI `Transaction.commit()` throws `commitFailed` when the commit response has no `commitTime`, which the **emulator** omits for a zero-write commit; the runner then retried 5× and `FirestoreTransactionUnitOfWork` surfaced a 500. That broke every legitimately write-less unit of work (`InboxedCommandHandler` on `.alreadyProcessed`, `IdempotentCommandHandler` replay, early "not found" returns). `FirestoreTransaction` now counts buffered writes (`FirestoreWriteTracker`), and `Firestore.runInTransaction` buffers one **no-op `delete` of the never-existing doc `_noop_commit/empty`** when the body wrote nothing, so the commit carries a write and answers with a `commitTime`. Deleting a missing doc changes nothing and fires no triggers (cost in production: one billed delete on write-less paths only). Not done by retrying/catching because the `TransactionError` enum is internal and the runner retries before we could intercept. Emulator regression tests: `FirestoreEmptyCommitIntegrationTests` (read-only body runs once; inbox duplicate path commits) — verified to fail with `commitFailed` without the fix. Supersedes the S06 note: write-only-by-necessity workarounds (activate/deactivate persisting) are no longer required but were left in place.
+- **S07 (Identity Platform check, read-only):** Identity Toolkit `GET admin/v2/projects/show-menu-dev/config` → `subtype: FIREBASE_AUTH`, `blockingFunctions: {}`. So `show-menu-dev` is **not** upgraded to Identity Platform and no blocking function is registered; `cloud-functions/identity-blocking` cannot fire until it is upgraded (blocking functions are an Identity Platform feature). Nothing was changed. Open question left to the user: upgrade (one-way) vs. Vapor sets the claim on `user.created` (new `IdentityToolkitClient`, not built).
+- **S07 (harness):** `user-onboarding` test 1 does **not** depend on the admin claim (it creates a plain user and waits for `users/{uid}`); the harness sets admin claims itself via the Admin SDK `setCustomUserClaims`. Test 2 (account link) is S08.
+- **S07 (`users/{uid}`):** `{id, email, name, avatarURL, accounts, createdAt, updatedAt}`, Timestamps (ms-precise), `email/name/avatarURL` explicit `null` when absent, `id` a plain field, additive `version` (set on first Vapor write). `displayName`/`photoURL`/`emailVerified` dropped from the aggregate (renamed `name`/`avatarURL`); `disabled` is kept for the self-removal rule but written only when `true`. Unlike Node (which stored `name`/`avatarURL` as `null` at creation), onboarding stores the Auth `displayName`/`photoUrl` when the event carries them (the forwarder always sends them) — revert to `null` if strict parity matters. `UserCreatedIntegrationEvent` gained an optional `photoURL`. `GET /users` filter `displayName` now filters the `name` field. `User.addAccount/removeAccount` are idempotent and record semantic `user.account.added|removed`.
+- **S07 (webhook auth):** `POST /` runs behind `EventarcAuthMiddleware` + `GoogleOIDCTokenVerifier` (`Integration/GoogleCloud/`, `Integration/Eventarc/`). Env: `EVENTARC_OIDC_AUDIENCE` (fallback `SCHEDULER_OIDC_AUDIENCE`), `EVENTARC_ALLOWED_SERVICE_ACCOUNTS` (comma-separated; empty = any Google-signed token for the audience, warned). Emulator → bypass; unset audience → deny-all (401) with a boot warning; JWKS outage → 503. The JWKS cache (max-age, coalesced refresh, stale-on-failure, kid pinning) was extracted from `FirebaseTokenVerifier` into `JWKSKeyCache` and is shared. Not exercised against Google's live JWKS (S16). The Firestore-forwarder (S08) will reuse the same audience.
+- **S07 (identity-blocking):** `decideUserClaims` → `{...claims, admin: true}` for a **verified** email in `ADMIN_EMAILS` (comma-separated, case-insensitive); grant-only (an existing admin claim is never revoked); fails open. `extractUserRecord` now also returns `emailVerified`. 37 `node --test` tests.
+- **S07 (forwarders):** `show-menu-firebase/forwarders` has `onUserCreated`/`onUserDeleted` (v1), envelope identical to `cloud-functions/auth-forwarder` (incl. `phoneNumber`; `ce-id = context.eventId`), no `Authorization`. Vitest (`npm test`). Also fixed `forwarders/.gitignore` (`lib/` → `/lib/`, it was hiding `src/lib`).
+- **S07 (harness):** `user-onboarding` test 1 ✓ (test 2 is S08), `plans-lifecycle` 4/4, `auth-rbac` 4/4, `smoke` 2/2. Inbox duplicate path proven on the emulator: a replayed `ce-id` over HTTP answers 200, commits with 0 events and does not re-run onboarding.
 
 ## 8. Risks
 - **Contract drift in client-read Firestore docs.** Mitigation: mapper round-trip tests against Node doc fixtures (S04–S14), plus a Flutter smoke run before S17.
