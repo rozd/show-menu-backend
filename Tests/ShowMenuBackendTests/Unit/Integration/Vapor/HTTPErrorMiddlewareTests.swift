@@ -64,6 +64,31 @@ struct HTTPErrorMiddlewareTests {
         try await app.asyncShutdown()
     }
 
+    private struct Hinted: DomainError, HTTPStatusHinted {
+        var httpStatusHint: HTTPResponseStatus { .unprocessableEntity }
+    }
+
+    @Test("httpStatusHint overrides the DomainError default")
+    func hint() {
+        let m = HTTPErrorMapping.map(Hinted())
+        #expect(m.status == .unprocessableEntity && m.code == "validation_failed")
+    }
+
+    @Test("order: trace → error envelope → others; default ErrorMiddleware removed")
+    func order() async throws {
+        let app = try await Application.make(.testing)
+        // entrypoint adds trace at .beginning before configure()
+        app.middleware.use(GoogleCloudPlatformTraceMiddleware(projectId: "p"), at: .beginning)
+        app.middleware.use(IdempotencyKeyMiddleware())
+        app.useErrorEnvelope()
+        let chain = app.middleware.resolve()
+        #expect(chain[0] is GoogleCloudPlatformTraceMiddleware)
+        #expect(chain[1] is HTTPErrorMiddleware)
+        #expect(chain.contains { $0 is IdempotencyKeyMiddleware })  // Vapor's RouteLoggingMiddleware default is kept
+        #expect(!chain.contains { $0 is ErrorMiddleware })
+        try await app.asyncShutdown()
+    }
+
     @Test("unknown route returns the 404 envelope, as JSON")
     func unknownRoute() async throws {
         try await withApp { app in
@@ -79,7 +104,7 @@ struct HTTPErrorMiddlewareTests {
     @Test("handlers' errors become envelopes; ErrorMiddleware is not stacked")
     func envelopes() async throws {
         try await withApp { app in
-            #expect(app.middleware.resolve().count == 1)
+            #expect(!app.middleware.resolve().contains { $0 is ErrorMiddleware })
             try await app.test(.GET, "boom") { res async throws in
                 #expect(res.status == .internalServerError)
                 let env = try res.content.decode(ErrorEnvelope.self)
