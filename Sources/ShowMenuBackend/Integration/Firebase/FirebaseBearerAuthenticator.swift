@@ -37,6 +37,9 @@ struct FirebaseAuthMiddleware: AsyncMiddleware {
         let principal: FirebasePrincipal
         do {
             principal = FirebasePrincipal(token: try await verifier.verify(bearer.token))
+        } catch let error as FirebaseJWKSUnavailableError {
+            // Infrastructure failure, not a bad token: 503 via the envelope.
+            throw error
         } catch {
             request.logger.debug("Bearer token rejected", metadata: [
                 "error": .string(String(describing: error))
