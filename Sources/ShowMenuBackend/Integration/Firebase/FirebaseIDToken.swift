@@ -11,13 +11,25 @@ struct FirebaseIDToken: JWTPayload {
     let sub: SubjectClaim
     let email: String?
     let admin: Bool?
+    /// Issued-at (seconds since epoch); must not be in the future.
+    var iat: IssuedAtClaim? = nil
+    /// Time of the user's last authentication (seconds since epoch); must not be in the future.
+    var authTime: TimeInterval? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case iss, aud, exp, sub, email, admin, iat
+        case authTime = "auth_time"
+    }
+
+    /// Tolerated clock skew for `iat` / `auth_time`.
+    static let leeway: TimeInterval = 60
 
     func verify(using algorithm: some JWTAlgorithm) async throws {
         try exp.verifyNotExpired()
     }
 
-    /// Issuer/audience/subject checks shared by the signed and emulator paths.
-    func validate(projectID: String) throws {
+    /// Issuer/audience/subject/time checks shared by the signed and emulator paths.
+    func validate(projectID: String, now: Date = Date()) throws {
         guard iss.value == "https://securetoken.google.com/\(projectID)" else {
             throw FirebaseAuthError.invalidIssuer(iss.value)
         }
@@ -27,6 +39,13 @@ struct FirebaseIDToken: JWTPayload {
         guard !sub.value.isEmpty else {
             throw FirebaseAuthError.missingSubject
         }
+        let limit = now.timeIntervalSince1970 + Self.leeway
+        if let iat, iat.value.timeIntervalSince1970 > limit {
+            throw FirebaseAuthError.issuedInFuture
+        }
+        if let authTime, authTime > limit {
+            throw FirebaseAuthError.issuedInFuture
+        }
     }
 }
 
@@ -35,6 +54,8 @@ enum FirebaseAuthError: Error, LocalizedError, Equatable {
     case invalidAudience([String])
     case missingSubject
     case malformedToken
+    case issuedInFuture
+    case unknownKeyID(String)
 
     var errorDescription: String? {
         switch self {
@@ -45,7 +66,11 @@ enum FirebaseAuthError: Error, LocalizedError, Equatable {
         case .missingSubject:
             return "Token has no subject (uid)"
         case .malformedToken:
-            return "Token is not a valid JWT"
+            return "Token is not a valid RS256 JWT with a key id"
+        case .issuedInFuture:
+            return "Token was issued in the future"
+        case .unknownKeyID(let kid):
+            return "Unknown signing key id '\(kid)'"
         }
     }
 }
