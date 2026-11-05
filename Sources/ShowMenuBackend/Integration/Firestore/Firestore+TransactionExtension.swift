@@ -269,33 +269,129 @@ extension Firestore {
 
     func runInTransaction<T>(
         _ transactionFunction: @escaping (FirestoreTransaction) async throws -> T,
-        options: TransactionOptions = TransactionOptions()
+        readOnly: Bool = false,
+        readTime: Timestamp? = nil,
+        maxAttempts: Int = 5
     ) async throws -> T {
-        let result: T? = try await runInTransaction(transactionFunction, options: options)
+        let result: T? = try await runInTransaction(
+            transactionFunction, readOnly: readOnly, readTime: readTime, maxAttempts: maxAttempts
+        )
         guard let result else {
             throw FirestoreError.transactionReturnedNil
         }
         return result
     }
 
+    /// Runs `transactionFunction` in a Firestore transaction, retrying ONLY
+    /// transient Firestore failures (see `TransactionRetryClassifier`).
+    ///
+    /// The pinned `Firestore.runTransaction` retries the closure on *any*
+    /// thrown error (5 attempts, ~3.5 s), so a domain/application error
+    /// (403/404/409/422, `ConcurrencyError`, idempotency rejections) would be
+    /// re-run five times before surfacing. We call it with `maxAttempts: 1`
+    /// (exactly one attempt — it still sleeps one ~0.25 s backoff before
+    /// giving up, which is the floor for a failing request) and run our own
+    /// attempt loop: a transient failure is retried, anything else is rethrown
+    /// immediately and unwrapped (the library has already rolled back). An
+    /// exhausted transient failure is thrown as
+    /// `FirestoreAPI.FirestoreError.transactionFailed`, as before.
     func runInTransaction<T>(
         _ transactionFunction: @escaping (FirestoreTransaction) async throws -> T,
-        options: TransactionOptions = TransactionOptions()
+        readOnly: Bool = false,
+        readTime: Timestamp? = nil,
+        maxAttempts: Int = 5
     ) async throws -> T? {
-        try await self.runTransaction({ transaction in
-            let wrapper = FirestoreTransaction(wrapping: transaction, firestore: self)
-            let result = try await transactionFunction(wrapper)
-            // A write-less body (inbox duplicate, idempotent replay, "not found"
-            // early return) would make the pinned runner's commit() throw
-            // `commitFailed` against the emulator and retry 5x. Buffer one no-op
-            // delete of a document that never exists so the commit carries a
-            // write and answers with a commitTime. Deleting a missing document
-            // changes nothing and fires no triggers.
-            if wrapper.writeTracker.writeCount == 0 {
-                transaction.delete(documentReference: self.document(FirestoreTransaction.noopCommitDocumentPath))
+        var attempt = 1
+        while true {
+            do {
+                return try await self.runTransaction({ transaction in
+                    let wrapper = FirestoreTransaction(wrapping: transaction, firestore: self)
+                    let result = try await transactionFunction(wrapper)
+                    // A write-less body (inbox duplicate, idempotent replay, "not found"
+                    // early return) would make the pinned runner's commit() throw
+                    // `commitFailed` against the emulator and retry 5x. Buffer one no-op
+                    // delete of a document that never exists so the commit carries a
+                    // write and answers with a commitTime. Deleting a missing document
+                    // changes nothing and fires no triggers.
+                    if wrapper.writeTracker.writeCount == 0 {
+                        transaction.delete(documentReference: self.document(FirestoreTransaction.noopCommitDocumentPath))
+                    }
+                    return result
+                }, options: TransactionOptions(maxAttempts: 1, readOnly: readOnly, readTime: readTime))
+            } catch {
+                let underlying = TransactionRetryClassifier.unwrap(error)
+                guard TransactionRetryClassifier.isTransient(underlying) else {
+                    throw underlying
+                }
+                guard attempt < maxAttempts else {
+                    throw FirestoreAPI.FirestoreError.transactionFailed(error: underlying)
+                }
+                // The library already slept ~0.25 s after the failed attempt;
+                // top up to the legacy 0.25 s x 1.5^n schedule.
+                let extra = TransactionRetryClassifier.extraDelay(forAttempt: attempt)
+                if extra > 0 {
+                    try await Task.sleep(for: .seconds(extra))
+                }
+                attempt += 1
             }
-            return result
-        }, options: options)!
+        }
     }
 
+}
+
+/// Pure classification of what a failed transaction attempt means.
+enum TransactionRetryClassifier {
+
+    /// The legacy library schedule (0.25 s x 1.5^n); its own one-attempt run
+    /// already waits `libraryDelay` after each failure.
+    static let backoff = RetryPolicy.Backoff.exponential(initial: 0.25, multiplier: 1.5, cap: 60)
+    static let libraryDelay: TimeInterval = 0.25
+
+    static func extraDelay(forAttempt attempt: Int) -> TimeInterval {
+        max(0, backoff.delay(forAttempt: attempt) - libraryDelay)
+    }
+
+    /// Strips the runner's `transactionFailed` wrapper(s).
+    static func unwrap(_ error: any Error) -> any Error {
+        var current = error
+        while let api = current as? FirestoreAPI.FirestoreError, case .transactionFailed(let inner) = api {
+            current = inner
+        }
+        return current
+    }
+
+    /// Whether `error` (already unwrapped) is a transient Firestore failure
+    /// worth re-running the whole closure for. Everything not originating in
+    /// the Firestore/gRPC transport (domain, application, `ConcurrencyError`,
+    /// idempotency, cancellation) is NOT transient.
+    ///
+    /// `alreadyExists` / `failedPrecondition` DO retry: a marker-doc `create`
+    /// (plan_skus, inbox, idempotency, checkout_locks) that loses a race fails
+    /// at commit, and the retry's re-read sees the winner.
+    static func isTransient(_ error: any Error) -> Bool {
+        if error is CancellationError { return false }
+        if let rpc = error as? RPCError { return isTransient(code: rpc.code) }
+        if let api = error as? FirestoreAPI.FirestoreError {
+            switch api {
+            case .rpcError(let rpc): return isTransient(code: rpc.code)
+            case .timeout, .maxAttemptsReached: return true
+            default: return false
+            }
+        }
+        if let ours = error as? FirestoreError { return ours.isRetryable }
+        // `TransactionError` is internal to FirebaseAPI, so match by name.
+        // `commitFailed` = the commit returned no commit time / aborted.
+        if "\(type(of: error))" == "TransactionError", "\(error)" == "commitFailed" { return true }
+        return false
+    }
+
+    static func isTransient(code: RPCError.Code) -> Bool {
+        switch code {
+        case .aborted, .alreadyExists, .failedPrecondition,
+             .unavailable, .deadlineExceeded, .resourceExhausted:
+            return true
+        default:
+            return false
+        }
+    }
 }

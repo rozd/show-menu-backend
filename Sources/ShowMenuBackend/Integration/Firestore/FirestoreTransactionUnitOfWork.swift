@@ -49,6 +49,12 @@ struct FirestoreTransactionUnitOfWork<Transport: ClientTransport>: UnitOfWork {
                 throw FirestoreError.from(grpcError: underlying)
             }
             throw underlying
+        } catch let error as FirestoreAPI.FirestoreError {
+            // A non-transient transport failure is rethrown unwrapped by
+            // `runInTransaction`; map it the same way as an exhausted one.
+            throw FirestoreError.from(grpcError: error)
+        } catch let error as RPCError {
+            throw FirestoreError.from(grpcError: error)
         }
 
         let events = await collector.drain()
