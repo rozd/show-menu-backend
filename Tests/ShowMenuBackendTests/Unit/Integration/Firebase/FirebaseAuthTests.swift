@@ -453,6 +453,33 @@ struct FirebaseAuthTests {
         }
     }
 
+    @Test("guard covers every method on unmatched /plans paths: anonymous 401, non-admin 403, admin 404")
+    func guardCoversAllMethods() async throws {
+        let k1 = try TestKey(kid: "k1")
+        try await withApp(server: FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))) { app in
+            let user = try await k1.sign(Self.claims())
+            let admin = try await k1.sign(Self.claims(admin: true))
+            let methods: [HTTPMethod] = [.POST, .PUT, .PATCH, .DELETE]
+            for method in methods {
+                for path in ["api/v1/plans/unknown", "api/v1/plans/unknown/deeper/path"] {
+                    try await app.test(method, path) { res async throws in
+                        #expect(res.status == .unauthorized, "\(method) \(path) anonymous")
+                    }
+                    try await app.test(method, path, headers: bearer(user)) { res async throws in
+                        #expect(res.status == .forbidden, "\(method) \(path) non-admin")
+                    }
+                    try await app.test(method, path, headers: bearer(admin)) { res async throws in
+                        #expect(res.status == .notFound, "\(method) \(path) admin")
+                    }
+                }
+            }
+            // The bare collection path, too (stand-in only implements GET).
+            try await app.test(.DELETE, "api/v1/plans") { res async throws in
+                #expect(res.status == .unauthorized)
+            }
+        }
+    }
+
     @Test("principal is bound for the request and feeds CommandMetadata.userId")
     func principalBound() async throws {
         let k1 = try TestKey(kid: "k1")

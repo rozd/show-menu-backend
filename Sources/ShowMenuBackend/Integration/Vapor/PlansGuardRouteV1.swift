@@ -8,8 +8,13 @@ import Vapor
 struct PlansGuardRouteV1: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let plans = routes.grouped("v1", "plans")
-        plans.get("**") { req async throws -> Response in
+        // Every method, like Node's `use()` guard. Real routes (more specific) win.
+        let notFound: @Sendable (Request) async throws -> Response = { req in
             throw Abort(.notFound, reason: "Route \(req.url.path) not found")
+        }
+        for method in [HTTPMethod.GET, .POST, .PUT, .PATCH, .DELETE] {
+            plans.on(method, "**", use: notFound)
+            plans.on(method, use: notFound)
         }
     }
 }
