@@ -231,6 +231,17 @@ struct LiqPayCallbackTests {
         #expect(await sut.audit.rows.isEmpty)
     }
 
+    @Test("only invoice-prefixed, path-safe, bounded ids are looked up",
+          arguments: [".", "..", "__x__", "a/b", "invoice-a/b", "order-1", "invoice-" + String(repeating: "x", count: 1500)])
+    func rejectsNonInvoiceIds(_ id: String) {
+        #expect(!HandleLiqPayCallbackUseCase.isInvoiceDocumentId(id))
+    }
+
+    @Test("a regular invoice id is accepted")
+    func acceptsInvoiceId() {
+        #expect(HandleLiqPayCallbackUseCase.isInvoiceDocumentId("invoice-\(UUID().uuidString)"))
+    }
+
     // MARK: Invalid transitions never fail the callback
 
     @Test("a late success after failure: audit written, invoice/order/session untouched, no error")
