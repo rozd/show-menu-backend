@@ -1,6 +1,6 @@
 # ShowMenuBackend
 
-Swift Vapor backend for Show Menu, a digital restaurant menu product (QR menus, with LiqPay payments in the Firebase repo).
+Swift Vapor backend for Show Menu, a digital restaurant menu product (QR menus, with LiqPay subscription payments handled by this backend). Firebase configuration, the local emulator bridge and the black-box contract suite live in the sibling repo `../show-menu-firebase`.
 
 ## Prerequisites
 
@@ -39,12 +39,18 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ### 3. Run locally
 
 ```bash
-# With emulators (start Firebase emulators first)
-firebase emulators:start
+# With emulators: terminal 1 (builds ../show-menu-firebase/forwarders, then starts
+# the auth 9099 / firestore 9002 / functions 9001 emulators via firebase.vapor.json)
+make emulators
 
-# In another terminal
-swift run Run
+# Terminal 2: the backend on :8080
+make run-local          # or: swift run Run
+
+# Terminal 3 (optional): the black-box contract suite
+make harness            # HARNESS_ARGS=smoke runs a single file
 ```
+
+The emulator config lives in the sibling repo (`FIREBASE_DIR`, default `../show-menu-firebase`); a bare `firebase emulators:start` from this directory does not work. The `functions` emulator only runs the Auth/Firestore → Vapor event forwarders.
 
 ### 4. Verify
 

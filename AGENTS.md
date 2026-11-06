@@ -36,7 +36,7 @@ For emulator development:
 export GCP_PROJECT_ID=demo-project
 export FIRESTORE_EMULATOR_HOST=localhost:9002
 export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
-firebase emulators:start  # in a separate terminal
+make emulators  # in a separate terminal (uses ../show-menu-firebase/firebase.vapor.json + forwarders)
 ```
 
 For real GCP project:
