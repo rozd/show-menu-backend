@@ -55,5 +55,29 @@ gcloud scheduler jobs create http check-expired-subscriptions --project=$P --loc
 
 An audience that differs from the URL callers use fails with a silent 401.
 
-## Caveat
-Until S17 cutover, the Node `functions` triggers (invoice/checkout) still run and would double-fire alongside the Vapor handlers.
+## Cutover state (S17, 2026-11-06)
+No Node code is deployed on `show-menu-dev`: `firebase functions:list` shows only the forwarders (`onUserCreated`, `onUserDeleted`, `onAccountCreated`) and `identity-beforeCreated` / `identity-beforeSignedIn`, which the Vapor backend needs, and `firebase ext:list` shows no extension. The double-fire caveat no longer applies. Always pass `--project show-menu-dev`: the default gcloud config on the dev machine may point at another project.
+
+### Firestore rules
+`show-menu-firebase/firestore.rules` is the real rule set (it replaced the test-mode rule that expired 2027-01-01). Deploy with `firebase deploy --only firestore:rules --project show-menu-dev` from `show-menu-firebase`; test with `npm --prefix rules-tests test`. `storage.rules` is still open (`allow read, write: if true`) and is **not** covered by S17.
+
+### Steps that need the LiqPay merchant console (manual)
+1. **Rotate the sandbox keys.** In the LiqPay merchant console issue a new public/private key pair (the old pair is in git history of `show-menu-firebase`). Then:
+   ```bash
+   P=show-menu-dev
+   printf '%s' "<new public key>"  | gcloud secrets versions add LIQPAY_PUBLIC_KEY  --data-file=- --project=$P
+   printf '%s' "<new private key>" | gcloud secrets versions add LIQPAY_PRIVATE_KEY --data-file=- --project=$P
+   gcloud run services update show-menu-backend --region=europe-west1 --project=$P   # new revision picks up `latest`
+   ```
+   Confirm the secrets are mounted as `latest` (`gcloud run services describe show-menu-backend --region=europe-west1 --project=$P`); disable the old versions afterwards.
+2. **Repoint the callback.** Set the merchant `server_url` to `https://show-menu-backend-329418335969.europe-west1.run.app/api/v1/payments/liqpay/callback` (the same value as `LIQPAY_CALLBACK_URL`). Checkout also sends it per request, so this only matters for subscription renewals LiqPay initiates.
+3. **Verify.** Run one sandbox purchase from the Flutter dev build (`--dart-define=API_BASE_URL=https://show-menu-backend-329418335969.europe-west1.run.app/api`) and confirm the session reaches `success` and a `subscriptions` document exists.
+
+### One-off reconcile (pre-cutover drain)
+Needs the scheduler identity, so run it as someone who can mint tokens for `show-menu-scheduler`:
+```bash
+URL=https://show-menu-backend-329418335969.europe-west1.run.app
+ID=$(gcloud auth print-identity-token --project show-menu-dev \
+  --impersonate-service-account=show-menu-scheduler@show-menu-dev.iam.gserviceaccount.com --audiences=$URL --include-email)
+curl -s -X POST -H "Authorization: Bearer $ID" "$URL/api/v1/subscriptions/jobs/check-expired?reconcileDays=365"
+```
