@@ -64,6 +64,9 @@ func routes(_ app: Application) throws {
     )
     try authenticated.register(collection: PurchaseRouteV1(controller: purchaseController))
 
+    // Subscriptions: Node's `DELETE /accounts/:a/subscriptions/:s` stub (200 `"OK"`, any authenticated user).
+    try authenticated.register(collection: SubscriptionCancelRouteV1())
+
     // Payments: the LiqPay `server_url` callback. PUBLIC (LiqPay sends no token): the
     // signature verified by the payment gateway is the authentication.
     let paymentCallbackController = PaymentCallbackController(

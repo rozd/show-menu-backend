@@ -65,8 +65,8 @@ _Created 2026-11-05. Source: `../show-menu-firebase/functions` (Node 20, firebas
 - Vapor Queues is not used, because it doesn't run with `min-instances=0`.
 
 **D8. Not ported:**
-- `/echo/echo`, `/echo/environment` (leaks env vars), and `/playground/*` (hardcoded keys).
-- The `DELETE /accounts/:a/subscriptions/:s` stub.
+- `/echo/environment` (leaks env vars) and `/playground/*` (hardcoded keys). `/echo/echo` was later ported (returns the raw body as a JSON string), and `hello`/`echo`/`version` answer GET/POST/PUT/PATCH/DELETE like Node.
+- The `DELETE /accounts/:a/subscriptions/:s` stub's behaviour. Only its auth guard is kept: a no-op route on `authenticated` answering 200 `"OK"`, so the harness gets 401 (not 404) without a token.
 - Dead events and unused code (see the Node inventory below).
 - The hardcoded `ADMIN_EMAILS`. It becomes the `ADMIN_EMAILS` env var on identity-blocking.
 

@@ -20,3 +20,7 @@ extension PendingCheckoutSessionError: HTTPStatusHinted {
 extension CustomerNotFoundError: HTTPStatusHinted {
     var httpStatusHint: HTTPResponseStatus { .notFound }
 }
+
+extension PlanNotActiveError: HTTPStatusHinted {
+    var httpStatusHint: HTTPResponseStatus { .badRequest }
+}

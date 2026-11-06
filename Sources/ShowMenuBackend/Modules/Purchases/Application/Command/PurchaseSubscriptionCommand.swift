@@ -51,6 +51,18 @@ struct PurchaseSubscriptionCommand: Command {
 
 extension PurchaseSubscriptionCommand.Payload {
 
+    private enum CodingKeys: String, CodingKey { case planId, price }
+
+    /// A `planId` that is not a string (e.g. `12345`) decodes to `nil`, so it surfaces as
+    /// ``PurchaseSubscriptionCommand/Error/planIdRequired`` (422), not a 400 decoding failure.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            planId: try? container.decodeIfPresent(String.self, forKey: .planId),
+            price: try container.decodeIfPresent(PurchaseSubscriptionCommand.PlanPriceInput.self, forKey: .price)
+        )
+    }
+
     /// Parses the requested price line; every failure is a `ValidationError` (422).
     func requestedPrice() throws -> PlanPrice {
         guard let line = price else { throw PurchaseSubscriptionCommand.Error.priceRequired }

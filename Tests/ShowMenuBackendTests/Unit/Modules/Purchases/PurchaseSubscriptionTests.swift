@@ -253,6 +253,7 @@ struct PurchaseSubscriptionTests {
     @Test("a stranger is denied and nothing is written")
     func stranger() async throws {
         let sut = try await makeSUT()
+        await sut.users.seed(UserModel(id: "uid-stranger", email: "s@example.com", name: "Stranger"))
         await #expect(throws: AuthorizationError.self) {
             _ = try await run(sut, as: StubPrincipal(id: "uid-stranger"), command(sut))
         }
@@ -278,6 +279,7 @@ struct PurchaseSubscriptionTests {
     @Test("an admin may purchase on any account")
     func admin() async throws {
         let sut = try await makeSUT()
+        await sut.users.seed(UserModel(id: "uid-admin", email: "admin@example.com", name: "Admin"))
         let invoiceId = try await run(
             sut, as: StubPrincipal(id: "uid-admin", roles: [.admin]), command(sut, email: "admin@example.com")
         )
@@ -310,6 +312,7 @@ struct PurchaseSubscriptionTests {
     @Test("unknown account -> AccountNotFoundError (404)")
     func accountNotFound() async throws {
         let sut = try await makeSUT()
+        await sut.users.seed(UserModel(id: creator, email: "a@b.c", name: "A"))
         await #expect(throws: AccountNotFoundError.self) {
             _ = try await run(sut, as: owner, command(sut, account: "missing"))
         }
@@ -326,7 +329,7 @@ struct PurchaseSubscriptionTests {
         }
     }
 
-    @Test("inactive plan -> 422")
+    @Test("inactive plan -> PlanNotActiveError (400 at the edge)")
     func inactivePlan() async throws {
         let sut = try await makeSUT(planActive: false)
         await sut.users.seed(UserModel(id: creator, email: "a@b.c", name: "A"))
@@ -386,16 +389,6 @@ struct PurchaseSubscriptionTests {
 
     // MARK: Customer
 
-    @Test("no users/{uid} document: falls back to the token email and 'Anonymous'")
-    func customerFallback() async throws {
-        let sut = try await makeSUT()
-        _ = try await run(sut, as: owner, command(sut, email: "token@example.com"))
-        let order = try #require(await sut.orders.insertedModels.first)
-        #expect(order.customer.name == "Anonymous")
-        #expect(order.customer.email == "token@example.com")
-        #expect(order.shipment.address == "token@example.com")
-    }
-
     @Test("a bare profile (no email) also falls back to the token email")
     func bareProfile() async throws {
         let sut = try await makeSUT()
@@ -404,11 +397,20 @@ struct PurchaseSubscriptionTests {
         #expect(try #require(await sut.orders.insertedModels.first).customer.email == "token@example.com")
     }
 
-    @Test("neither a user document nor a token email -> CustomerNotFoundError (404)")
+    @Test("no users/{uid} document -> CustomerNotFoundError (404), even with a token email")
     func customerNotFound() async throws {
         let sut = try await makeSUT()
         await #expect(throws: CustomerNotFoundError.self) {
-            _ = try await run(sut, as: owner, command(sut))
+            _ = try await run(sut, as: owner, command(sut, email: "token@example.com"))
+        }
+        #expect(await sut.orders.insertedModels.isEmpty)
+    }
+
+    @Test("a non-member with no profile gets 404, not 403 (the profile is resolved before membership)")
+    func ghostNonMember() async throws {
+        let sut = try await makeSUT()
+        await #expect(throws: CustomerNotFoundError.self) {
+            _ = try await run(sut, as: StubPrincipal(id: "uid-ghost"), command(sut))
         }
         #expect(await sut.orders.insertedModels.isEmpty)
     }
@@ -550,5 +552,17 @@ struct PurchaseSubscriptionTests {
         #expect(replayed == invoiceId)
         #expect(try await sut.sessions.fetch(byId: invoiceId)?.paymentPageURL == "https://pay.example/checkout")
         #expect(await sut.orders.insertedModels.count == 1)
+    }
+}
+
+@Suite("Purchase payload decoding")
+struct PurchasePayloadDecodingTests {
+    @Test("a non-string planId decodes to nil (-> planIdRequired, 422) instead of failing the decode")
+    func nonStringPlanId() throws {
+        let payload = try JSONDecoder().decode(
+            PurchaseSubscriptionCommand.Payload.self,
+            from: Data(#"{"planId": 12345}"#.utf8)
+        )
+        #expect(payload.planId == nil)
     }
 }

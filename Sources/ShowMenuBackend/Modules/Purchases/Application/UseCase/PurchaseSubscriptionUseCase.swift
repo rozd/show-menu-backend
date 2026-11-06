@@ -51,6 +51,10 @@ struct PurchaseSubscriptionUseCase: UseCase {
 
         // MARK: Reads
 
+        // An unknown purchaser is a 404 whatever the account is: resolved before the
+        // membership check, which would otherwise answer 403 for a user with no profile.
+        let customer = try await resolveCustomer(principal: principal, fallbackEmail: params.customerEmail)
+
         guard let accountModel = try await accountDataSourceFactory("", context.transaction)
             .fetch(byId: params.accountId)
         else {
@@ -90,8 +94,6 @@ struct PurchaseSubscriptionUseCase: UseCase {
         guard plan.matches(price: requested), let planPrice = plan.price(matching: requested) else {
             throw PlanPriceMismatchError(planId: planId)
         }
-
-        let customer = try await resolveCustomer(principal: principal, fallbackEmail: params.customerEmail)
 
         let lock = try await ensureNoPendingCheckout(accountId: account.id)
 
@@ -138,17 +140,15 @@ struct PurchaseSubscriptionUseCase: UseCase {
 
     // MARK: Customer
 
-    /// Node: `users/{uid}` or "Customer not found". The `users/{uid}` document is written
-    /// asynchronously by the onboarding webhook (and S08 may leave a bare profile first),
-    /// so a missing document or email falls back to the token's email; only when there is
-    /// neither is the customer unknown (404).
+    /// Node: `users/{uid}` or "Customer not found". A missing profile is a 404 even when the
+    /// token carries an email: the purchaser must have been provisioned by onboarding.
+    /// The token email only fills in a profile that exists without one.
     private func resolveCustomer(principal: any Principal, fallbackEmail: String?) async throws -> CustomerInfo {
-        let user = try await userRepositoryFactory(context).fetch(byId: User.Id(rawValue: principal.id))
-        let email = [user?.email, fallbackEmail].compactMap { $0 }.first { !$0.isEmpty }
-        if user == nil && email == nil {
+        guard let user = try await userRepositoryFactory(context).fetch(byId: User.Id(rawValue: principal.id)) else {
             throw CustomerNotFoundError(userId: principal.id)
         }
-        let name = user?.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Anonymous"
+        let email = [user.email, fallbackEmail].compactMap { $0 }.first { !$0.isEmpty }
+        let name = user.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Anonymous"
         return CustomerInfo(name: name, email: email, phone: nil, address: nil)
     }
 

@@ -26,7 +26,7 @@ struct OrderInvoiceAlreadyCreatedError: DomainError, LocalizedError, Equatable {
     var errorDescription: String? { "Order \(orderId.rawValue) already has an invoice" }
 }
 
-/// The plan exists but is not on sale (`isActive == false`). 422.
+/// The plan exists but is not on sale (`isActive == false`). 400 (`Purchases+Vapor.swift`, as Node).
 struct PlanNotActiveError: ValidationError, LocalizedError, Equatable {
     let planId: String
     var errorDescription: String? { "Plan \(planId) is not active" }
