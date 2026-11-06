@@ -42,6 +42,40 @@ struct EchoRouteTests {
         }
     }
 
+    @Test("hello, echo and version answer GET/POST/PUT/PATCH/DELETE without a token",
+          arguments: ["hello", "echo", "version"],
+          [HTTPMethod.GET, .POST, .PUT, .PATCH, .DELETE])
+    func methodAgnostic(route: String, method: HTTPMethod) async throws {
+        try await withApp { app in
+            try await app.test(method, "api/v1/echo/\(route)") { res async throws in
+                #expect(res.status == .ok)
+            }
+        }
+    }
+
+    @Test("POST /api/v1/echo/echo returns the request body as a JSON string")
+    func echoBody() async throws {
+        try await withApp { app in
+            try await app.test(.POST, "api/v1/echo/echo", beforeRequest: { req in
+                req.body = ByteBuffer(string: "ping")
+            }) { res async throws in
+                #expect(res.status == .ok)
+                #expect(res.headers.contentType == .json)
+                let text = try JSONDecoder().decode(String.self, from: Data(res.body.readableBytesView))
+                #expect(text == "ping")
+            }
+        }
+    }
+
+    @Test("GET /api/v1/echo/environment is not served (it leaked process.env)")
+    func noEnvironment() async throws {
+        try await withApp { app in
+            try await app.test(.GET, "api/v1/echo/environment") { res async throws in
+                #expect(res.status == .notFound)
+            }
+        }
+    }
+
     @Test("the old unprefixed /v1/echo path is not served")
     func noLegacyPrefix() async throws {
         try await withApp { app in
