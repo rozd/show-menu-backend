@@ -14,13 +14,17 @@ public func configure(_ app: Application) async throws {
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 
 
-    // Configuration Point: CORS: uncomment to set
-    // let cors = CORSMiddleware(configuration: .init(
-    //     allowedOrigin: .all,
-    //     allowedMethods: [.GET, .POST, .PUT, .DELETE, .PATCH, .OPTIONS],
-    //     allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith]
-    // ))
-    // app.middleware.use(cors, at: .beginning)
+    // CORS: local development only. The Flutter web apps run on a different
+    // origin (http://localhost:<port>) than Vapor (:8080). Gated on the Auth
+    // emulator being configured, so deployed (Cloud Run) builds never get `.all`.
+    if Environment.get("FIREBASE_AUTH_EMULATOR_HOST") != nil {
+        let cors = CORSMiddleware(configuration: .init(
+            allowedOrigin: .all,
+            allowedMethods: [.GET, .POST, .PUT, .DELETE, .PATCH, .OPTIONS],
+            allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith, "Idempotency-Key"]
+        ))
+        app.middleware.use(cors, at: .beginning)
+    }
 
     // Lift the Idempotency-Key header into RequestContext for the command
     // pipeline's IdempotentCommandHandler. Registered globally; a no-op for
