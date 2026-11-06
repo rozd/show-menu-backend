@@ -107,8 +107,8 @@ Each deployed environment is a **separate GCP project** with its own Cloud Run s
 
 | Environment | GCP Project | Region | Cloud Run Service |
 |---|---|---|---|
-| **Production** | `show-menu-dev` | `us-central1` | `show-menu-backend` |
-| **Staging** | `show-menu-dev-staging` | `us-central1` | `show-menu-backend` |
+| **Production** | `show-menu-dev` | `europe-west1` | `show-menu-backend` |
+| **Staging** | `show-menu-dev-staging` | `europe-west1` | `show-menu-backend` |
 
 Add rows for additional environments (development, QA, etc.) as needed. The deploy and IAM steps below are run once per environment by changing the exported variables.
 
@@ -119,12 +119,12 @@ Set the variables for the target environment, then deploy both functions from th
 ```bash
 # Production
 export PROJECT_ID=show-menu-dev
-export REGION=us-central1
+export REGION=europe-west1
 export SERVICE_NAME=show-menu-backend
 
 # Staging — uncomment for staging deploys
 # export PROJECT_ID=show-menu-dev-staging
-# export REGION=us-central1
+# export REGION=europe-west1
 # export SERVICE_NAME=show-menu-backend
 
 export BACKEND_URL=$(gcloud run services describe $SERVICE_NAME \
@@ -296,7 +296,7 @@ gcloud functions deploy onAccountCreated \
   --source ./cloud-functions/firestore-forwarder
 ```
 
-> **Region:** a gen-1 Firestore trigger must be deployed in the **same region as the Firestore database** (`us-central1` for `show-menu-dev`).
+> **Region:** a gen-1 Firestore trigger must be deployed in the **same region as the Firestore database** (`show-menu-dev` uses multi-region `eur3`, whose function region is `europe-west1`).
 
 #### Verify
 

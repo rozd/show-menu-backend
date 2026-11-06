@@ -1,0 +1,20 @@
+# Cloud Build trigger (documentation of the live config; recreate with
+# `gcloud builds triggers import --source=.infra/triggers/production-deploy.yaml --project=show-menu-dev --region=europe-west1`).
+# Fires when release-please's merged release PR pushes a `vX.Y.Z` tag.
+description: Deploy show-menu-backend to Cloud Run when a release tag is pushed
+filename: cloudbuild.yaml
+github:
+  name: show-menu-backend
+  owner: rozd
+  push:
+    tag: ^v.*
+ignoredFiles:
+- .github/**
+- '*.md'
+- docs/**
+name: production-deploy
+substitutions:
+  _REGION: europe-west1
+  _REPOSITORY_NAME: show-menu-backend-repo
+  _SERVICE_NAME: show-menu-backend
+  _SA_NAME: show-menu-api
