@@ -1,46 +1,109 @@
-substitutions:
-  _TAG: latest
-
+# Build, push and deploy show-menu-backend to Cloud Run.
+#
+# Normal path: a `vX.Y.Z` tag created by merging the release-please PR fires the
+# `production-deploy` trigger (see .infra/triggers/). Manual path:
+#   gcloud builds submit --project=show-menu-dev --config=cloudbuild.yaml \
+#     --substitutions=_TAG=manual-$(git rev-parse --short HEAD)
+#
+# Required substitutions are set on the trigger (defaults below suit show-menu-dev).
+# Secrets LIQPAY_PUBLIC_KEY / LIQPAY_PRIVATE_KEY live in Secret Manager.
+#
+# The Cloud Run URL is deterministic (https://<service>-<projectNumber>.<region>.run.app),
+# so the OIDC audiences and callback URL are known before the first deploy and no
+# second "URL fix-up" deploy is needed. The audience must match the URL the callers
+# (Eventarc forwarders, Cloud Scheduler) use exactly, or requests fail with a silent 401.
 steps:
+  # Step 1: pick the image tag (git tag on release builds, else _TAG / short SHA).
+  - name: 'gcr.io/cloud-builders/git'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TAG="$TAG_NAME"
+        if [ -z "$$TAG" ]; then TAG="${_TAG}"; fi
+        if [ "$$TAG" = "latest" ] && [ -n "$SHORT_SHA" ]; then TAG="$SHORT_SHA"; fi
+        echo "$$TAG" > /workspace/.image-tag
+        echo "Image tag: $$TAG"
+
+  # Step 2: pull :latest as a layer cache (a miss is fine on the first build).
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:latest || exit 0
+
+  # Step 3: build.
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
     env:
       - DOCKER_BUILDKIT=1
     args:
-      - build
-      - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:${_TAG}
-      - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:latest
-      - .
-      - --cache-from
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:latest
+      - '-c'
+      - |
+        IMAGE=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}
+        docker build \
+          -t $${IMAGE}:$$(cat /workspace/.image-tag) \
+          -t $${IMAGE}:latest \
+          --cache-from $${IMAGE}:latest \
+          .
+
+  # Step 4: push.
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
     args:
-      - push
-      - --all-tags
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}
+      - '-c'
+      - |
+        docker push --all-tags ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}
+
+  # Step 5: deploy to Cloud Run.
+  # `^|^` makes `|` the env-var separator so comma-separated lists survive.
   - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
     args:
-      - run
-      - deploy
-      - ${_SERVICE_NAME}
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:${_TAG}
-      - --region=${_REGION}
-      - --memory=512Mi
-      - --platform=managed
-      - --allow-unauthenticated
-      - --min-instances=0
-      - --max-instances=5
-      - --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID
-images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:${_TAG}'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:latest'
+      - '-c'
+      - |
+        set -eo pipefail
+        IMAGE=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:$$(cat /workspace/.image-tag)
+        SERVICE_URL=https://${_SERVICE_NAME}-$PROJECT_NUMBER.${_REGION}.run.app
+        SA=${_SA_NAME}@$PROJECT_ID.iam.gserviceaccount.com
+
+        ENV_VARS="^|^GCP_PROJECT_ID=$PROJECT_ID"
+        ENV_VARS="$${ENV_VARS}|GCP_CLOUD_RUN_SERVICE_URL=$${SERVICE_URL}"
+        ENV_VARS="$${ENV_VARS}|EVENTARC_OIDC_AUDIENCE=$${SERVICE_URL}"
+        ENV_VARS="$${ENV_VARS}|SCHEDULER_OIDC_AUDIENCE=$${SERVICE_URL}"
+        ENV_VARS="$${ENV_VARS}|EVENTARC_ALLOWED_SERVICE_ACCOUNTS=${_EVENTARC_ALLOWED_SERVICE_ACCOUNTS}"
+        ENV_VARS="$${ENV_VARS}|SCHEDULER_ALLOWED_SERVICE_ACCOUNTS=${_SCHEDULER_ALLOWED_SERVICE_ACCOUNTS}"
+        ENV_VARS="$${ENV_VARS}|LIQPAY_CALLBACK_URL=$${SERVICE_URL}/api/v1/payments/liqpay/callback"
+        ENV_VARS="$${ENV_VARS}|LIQPAY_RESULT_URL=${_LIQPAY_RESULT_URL}"
+        REF="$TAG_NAME"
+        if [ -z "$$REF" ]; then REF="$BRANCH_NAME"; fi
+        ENV_VARS="$${ENV_VARS}|BUILD_BRANCH_NAME=$${REF}"
+        ENV_VARS="$${ENV_VARS}|BUILD_SHORT_SHA=$SHORT_SHA"
+
+        gcloud run deploy ${_SERVICE_NAME} \
+          --image=$${IMAGE} \
+          --region=${_REGION} \
+          --platform=managed \
+          --service-account=$${SA} \
+          --memory=512Mi \
+          --allow-unauthenticated \
+          --min-instances=0 \
+          --max-instances=5 \
+          --set-env-vars="$${ENV_VARS}" \
+          --update-secrets=LIQPAY_PUBLIC_KEY=LIQPAY_PUBLIC_KEY:latest,LIQPAY_PRIVATE_KEY=LIQPAY_PRIVATE_KEY:latest
+
+substitutions:
+  _TAG: latest
+  _REGION: europe-west1
+  _REPOSITORY_NAME: show-menu-backend-repo
+  _SERVICE_NAME: show-menu-backend
+  _SA_NAME: show-menu-api
+  # Comma-separated service-account emails allowed to call the Eventarc / Scheduler endpoints.
+  _EVENTARC_ALLOWED_SERVICE_ACCOUNTS: show-menu-dev@appspot.gserviceaccount.com
+  _SCHEDULER_ALLOWED_SERVICE_ACCOUNTS: show-menu-scheduler@show-menu-dev.iam.gserviceaccount.com
+  _LIQPAY_RESULT_URL: https://show-menu-dev.web.app
 timeout: 1800s
 options:
   logging: CLOUD_LOGGING_ONLY
+  substitutionOption: 'ALLOW_LOOSE'

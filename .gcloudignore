@@ -13,4 +13,3 @@ db.sqlite
 default.profraw
 docker-compose.yml
 README.md
-Tests/
