@@ -42,9 +42,10 @@ struct SchedulerAuthMiddleware: AsyncMiddleware {
         }
 
         if let oidc, let bearer = request.headers.bearerAuthorization {
+            var verified = false
             do {
                 try await oidc.verify(bearer.token)
-                return try await next.respond(to: request)
+                verified = true
             } catch let unavailable as FirebaseJWKSUnavailableError {
                 // Infrastructure failure, not a bad token: let the scheduler retry.
                 throw unavailable
@@ -52,6 +53,11 @@ struct SchedulerAuthMiddleware: AsyncMiddleware {
                 request.logger.warning("Scheduler OIDC verification failed", metadata: [
                     "error": .string(String(describing: error)),
                 ])
+            }
+            // Outside the `do`: an error from the job itself must propagate as itself,
+            // never be logged as a verification failure and turned into a 401.
+            if verified {
+                return try await next.respond(to: request)
             }
         }
 

@@ -159,6 +159,24 @@ struct SchedulerAuthMiddlewareTests {
         }
     }
 
+    @Test("an error thrown by the job behind a valid token keeps its own status, not 401")
+    func jobErrorIsNotAuthFailure() async throws {
+        let key = try TestKey(kid: "k1")
+        let app = try await Application.make(.testing)
+        do {
+            app.useErrorEnvelope()
+            app.grouped(Self.middleware(trusting: key)).post { _ async throws -> HTTPStatus in
+                throw Abort(.badGateway, reason: "query requires an index")
+            }
+            let status = try await post(app, signedBy: key)
+            #expect(status == .badGateway)
+        } catch {
+            try await app.asyncShutdown()
+            throw error
+        }
+        try await app.asyncShutdown()
+    }
+
     // MARK: API key
 
     @Test("the right X-Api-Key passes; a wrong or missing one is 401")
