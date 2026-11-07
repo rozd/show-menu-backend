@@ -12,9 +12,13 @@
 # Usage:
 #   scripts/dev-local.sh              # start emulators + backend
 #   scripts/dev-local.sh --no-build   # skip forwarders npm install/build
+#   scripts/dev-local.sh --fresh      # ignore saved emulator data (start empty)
 #   scripts/dev-local.sh --help
 #
-# Ctrl-C stops both. Logs: .local/logs/emulators.log (backend logs go to the terminal).
+# Emulator data (Auth users, Firestore, Storage) is imported from and exported
+# on exit to .local/emulator-data (override with EMULATOR_DATA_DIR), so sign-ins
+# survive restarts. Ctrl-C stops both. Logs: .local/logs/emulators.log (backend
+# logs go to the terminal).
 # Flutter debug builds already point at these ports; no --dart-define needed.
 
 set -euo pipefail
@@ -26,15 +30,18 @@ PORT="${PORT:-8080}"
 LOG_DIR="$BACKEND_DIR/.local/logs"
 EMULATOR_LOG="$LOG_DIR/emulators.log"
 EMULATOR_TIMEOUT="${EMULATOR_TIMEOUT:-120}"
+EMULATOR_DATA_DIR="${EMULATOR_DATA_DIR:-$BACKEND_DIR/.local/emulator-data}"
 
 # host:port pairs the Flutter app expects (must match firebase.vapor.json).
 EMULATOR_PORTS=(9099 9002 9003 9001)
 
 BUILD_FORWARDERS=1
+FRESH=0
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD_FORWARDERS=0 ;;
-    -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --fresh) FRESH=1 ;;
+    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -55,7 +62,7 @@ for p in "${EMULATOR_PORTS[@]}" "$PORT" 4000; do
   fi
 done
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$EMULATOR_DATA_DIR"
 
 # ---- cleanup -----------------------------------------------------------------
 EMULATOR_PID=""
@@ -64,8 +71,8 @@ cleanup() {
   if [ -n "$EMULATOR_PID" ] && kill -0 "$EMULATOR_PID" 2>/dev/null; then
     log "stopping emulators..."
     kill -INT "$EMULATOR_PID" 2>/dev/null || true
-    # give the Firebase CLI a few seconds to stop its Java children cleanly
-    for _ in $(seq 1 15); do kill -0 "$EMULATOR_PID" 2>/dev/null || break; sleep 1; done
+    # give the Firebase CLI time to export data and stop its Java children cleanly
+    for _ in $(seq 1 30); do kill -0 "$EMULATOR_PID" 2>/dev/null || break; sleep 1; done
     kill -KILL "$EMULATOR_PID" 2>/dev/null || true
   fi
 }
@@ -78,11 +85,22 @@ if [ "$BUILD_FORWARDERS" -eq 1 ]; then
   npm --prefix "$FIREBASE_DIR/forwarders" run build --silent
 fi
 
+# --import fails on a directory without an export, so only pass it once one exists.
+IMPORT_ARGS=()
+if [ "$FRESH" -eq 0 ] && [ -f "$EMULATOR_DATA_DIR/firebase-export-metadata.json" ]; then
+  IMPORT_ARGS=(--import "$EMULATOR_DATA_DIR")
+  log "importing emulator data from $EMULATOR_DATA_DIR"
+else
+  log "starting with empty emulators (data will be exported to $EMULATOR_DATA_DIR on exit)"
+fi
+
 log "starting emulators (log: $EMULATOR_LOG)"
 ( cd "$FIREBASE_DIR" && exec firebase emulators:start \
     --config firebase.vapor.json \
     --only auth,firestore,storage,functions \
-    --project "$FIREBASE_PROJECT" ) >"$EMULATOR_LOG" 2>&1 &
+    --project "$FIREBASE_PROJECT" \
+    ${IMPORT_ARGS[@]+"${IMPORT_ARGS[@]}"} \
+    --export-on-exit "$EMULATOR_DATA_DIR" ) >"$EMULATOR_LOG" 2>&1 &
 EMULATOR_PID=$!
 
 # Build the backend while the emulators boot (they are independent).
