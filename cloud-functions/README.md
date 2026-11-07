@@ -24,7 +24,7 @@ Forwards Firebase Auth user lifecycle events (creation, deletion) to the Swift b
 | **Generation** | v1 (required — v2 does not support auth triggers) |
 | **Dependencies** | None (zero `npm install` needed) |
 | **Trigger** | Firebase Auth event (`providers/firebase.auth/eventTypes/user.create` / `user.delete`) |
-| **Target** | `POST /` on the Cloud Run backend (`EventarcWebhookController`) |
+| **Target** | `POST /api/v1/events/eventarc` on the Cloud Run backend (`EventarcController`) |
 
 #### How it works
 
@@ -39,7 +39,7 @@ Cloud Function v1 (auth-forwarder)
   │
   ▼
 Cloud Run (Swift backend)
-  │  EventarcWebhookController receives POST /
+  │  EventarcController receives POST /api/v1/events/eventarc
   │  Parses CloudEvents headers + AuthEventData
   │  Dispatches UserCreatedIntegrationEvent / UserDeletedIntegrationEvent
   │
@@ -49,7 +49,7 @@ CreateUserAccountCommandHandler / DeleteUserAccountCommandHandler
 
 #### CloudEvents format
 
-The function formats requests to match the backend's `EventarcWebhookController` expectations:
+The function formats requests to match the backend's `EventarcController` expectations:
 
 **Headers:**
 | Header | Value |
@@ -212,7 +212,7 @@ Forwards the creation of `accounts/{accountId}` (a document the client writes) t
 | **Dependencies** | None (zero `npm install` needed) |
 | **Entry point** | `onAccountCreated` |
 | **Trigger** | `providers/cloud.firestore/eventTypes/document.create` on `accounts/{accountId}` |
-| **Target** | `POST /` on the Cloud Run backend (`EventarcWebhookController`) |
+| **Target** | `POST /api/v1/events/eventarc` on the Cloud Run backend (`EventarcController`) |
 | **Tests** | `node --test` in the function directory (payload flattener + envelope) |
 
 #### How it works
@@ -228,7 +228,7 @@ Cloud Function v1 (firestore-forwarder)
   │
   ▼
 Cloud Run (Swift backend)
-  │  EventarcWebhookController receives POST /
+  │  EventarcController receives POST /api/v1/events/eventarc
   │  Publishes AccountCreatedIntegrationEvent (id derived from ce-source + ce-id)
   │
   ▼

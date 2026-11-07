@@ -5,6 +5,7 @@ import JWTKit
 import Logging
 import NIOHTTP1
 import Testing
+import HTTPTypes
 import Vapor
 import VaporTesting
 @testable import ShowMenuBackend
@@ -13,7 +14,7 @@ import VaporTesting
 /// removal, so outside the emulator a missing or wrong Google OIDC token must be
 /// a 401 — before any CloudEvent is parsed.
 @Suite("Eventarc webhook authentication (Google OIDC)")
-struct EventarcAuthMiddlewareTests {
+struct EventarcAuthenticatorTests {
 
     static let audience = "https://show-menu-backend-123.us-central1.run.app"
     static let forwarder = "forwarder@show-menu-dev.iam.gserviceaccount.com"
@@ -62,50 +63,47 @@ struct EventarcAuthMiddlewareTests {
         )
     }
 
-    private static func middleware(
+    private static func authenticator(
         trusting key: TestKey?,
         allowedEmails: Set<String> = [],
         jwksFails: Bool = false
-    ) -> EventarcAuthMiddleware {
+    ) -> EventarcAuthenticator {
         let fetcher: JWKSFetcher = {
             if jwksFails { throw FirebaseJWKSUnavailableError(underlying: "HTTP 500") }
             var headers = HTTPHeaders()
             headers.replaceOrAdd(name: .cacheControl, value: "public, max-age=3600")
             return (key?.jwksData ?? Data(#"{"keys":[]}"#.utf8), headers)
         }
-        return EventarcAuthMiddleware(
+        return EventarcAuthenticator(
             oidc: GoogleOIDCTokenVerifier(
                 audience: audience, allowedEmails: allowedEmails, fetcher: fetcher, logger: Logger(label: "test")
             ),
-            bypassInEmulator: false
+            bypassInEmulator: false,
+            logger: Logger(label: "test")
         )
     }
 
-    /// Serves `POST /` behind the middleware, answering 200 when auth passes.
+    /// Kept as a thin wrapper so each test reads as "given this authenticator, ...".
     private func withApp(
-        _ middleware: EventarcAuthMiddleware, _ body: (Application) async throws -> Void
+        _ authenticator: EventarcAuthenticator, _ body: (EventarcAuthenticator) async throws -> Void
     ) async throws {
-        let app = try await Application.make(.testing)
+        try await body(authenticator)
+    }
+
+    /// Runs the authenticator on the given bearer token and answers the HTTP status the contract
+    /// would produce: `.ok` when authenticated, else the error envelope's status.
+    private func post(_ auth: EventarcAuthenticator, token: String?) async throws -> HTTPStatus {
+        var headers = HTTPFields()
+        if let token { headers[.authorization] = "Bearer \(token)" }
         do {
-            app.useErrorEnvelope()
-            app.grouped(middleware).post { _ async -> HTTPStatus in .ok }
-            try await body(app)
+            try await auth.authenticate(headers: headers)
+            return .ok
         } catch {
-            try await app.asyncShutdown()
-            throw error
+            return HTTPErrorMapping.map(error).status
         }
-        try await app.asyncShutdown()
     }
 
-    private func post(_ app: Application, token: String?) async throws -> HTTPStatus {
-        var headers = HTTPHeaders()
-        if let token { headers.bearerAuthorization = .init(token: token) }
-        var status = HTTPStatus.internalServerError
-        try await app.testing().test(.POST, "", headers: headers) { res async in status = res.status }
-        return status
-    }
-
-    private func post(_ app: Application, signedBy key: TestKey, _ claims: GoogleOIDCToken = claims(), kid: String? = nil) async throws -> HTTPStatus {
+    private func post(_ app: EventarcAuthenticator, signedBy key: TestKey, _ claims: GoogleOIDCToken = claims(), kid: String? = nil) async throws -> HTTPStatus {
         let token = try await key.sign(claims, kid: kid)
         return try await post(app, token: token)
     }
@@ -115,7 +113,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a valid forwarder token passes")
     func validToken() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key)) { app in
+        try await withApp(Self.authenticator(trusting: key)) { app in
             let status = try await post(app, signedBy: key)
             #expect(status == .ok)
         }
@@ -124,7 +122,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("an allow-listed service account passes")
     func allowListed() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key, allowedEmails: [Self.forwarder])) { app in
+        try await withApp(Self.authenticator(trusting: key, allowedEmails: [Self.forwarder])) { app in
             let status = try await post(app, signedBy: key)
             #expect(status == .ok)
         }
@@ -133,7 +131,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a missing Authorization header is 401")
     func missingToken() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key)) { app in
+        try await withApp(Self.authenticator(trusting: key)) { app in
             let status = try await post(app, token: nil)
             #expect(status == .unauthorized)
         }
@@ -142,7 +140,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a garbage bearer token is 401")
     func garbageToken() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key)) { app in
+        try await withApp(Self.authenticator(trusting: key)) { app in
             let status = try await post(app, token: "not.a.jwt")
             #expect(status == .unauthorized)
         }
@@ -152,7 +150,7 @@ struct EventarcAuthMiddlewareTests {
     func forgedSignature() async throws {
         let trusted = try TestKey(kid: "k1")
         let attacker = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: trusted)) { app in
+        try await withApp(Self.authenticator(trusting: trusted)) { app in
             let status = try await post(app, signedBy: attacker)
             #expect(status == .unauthorized)
         }
@@ -161,7 +159,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a token with an unknown kid is 401")
     func unknownKid() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key)) { app in
+        try await withApp(Self.authenticator(trusting: key)) { app in
             let status = try await post(app, signedBy: key, kid: "other")
             #expect(status == .unauthorized)
         }
@@ -170,7 +168,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("wrong audience, wrong issuer and expiry are all 401")
     func claimFailures() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key)) { app in
+        try await withApp(Self.authenticator(trusting: key)) { app in
             for claims in [
                 Self.claims(aud: "https://someone-else.run.app"),
                 Self.claims(iss: "https://evil.example.com"),
@@ -185,7 +183,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a service account outside the allow-list is 401")
     func notAllowListed() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key, allowedEmails: ["only@x.iam.gserviceaccount.com"])) { app in
+        try await withApp(Self.authenticator(trusting: key, allowedEmails: ["only@x.iam.gserviceaccount.com"])) { app in
             let status = try await post(app, signedBy: key)
             #expect(status == .unauthorized)
         }
@@ -194,7 +192,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("an allow-listed email that Google marks unverified is 401")
     func allowListedButUnverified() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key, allowedEmails: [Self.forwarder])) { app in
+        try await withApp(Self.authenticator(trusting: key, allowedEmails: [Self.forwarder])) { app in
             let status = try await post(app, signedBy: key, Self.claims(emailVerified: false))
             #expect(status == .unauthorized)
         }
@@ -203,7 +201,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("a JWKS outage is 503, not 401")
     func jwksOutage() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(Self.middleware(trusting: key, jwksFails: true)) { app in
+        try await withApp(Self.authenticator(trusting: key, jwksFails: true)) { app in
             let status = try await post(app, signedBy: key)
             #expect(status == .serviceUnavailable)
         }
@@ -212,7 +210,7 @@ struct EventarcAuthMiddlewareTests {
     @Test("an unconfigured middleware (no audience) denies every request")
     func unconfigured() async throws {
         let key = try TestKey(kid: "k1")
-        try await withApp(EventarcAuthMiddleware(oidc: nil, bypassInEmulator: false)) { app in
+        try await withApp(EventarcAuthenticator(oidc: nil, bypassInEmulator: false)) { app in
             let anonymous = try await post(app, token: nil)
             #expect(anonymous == .unauthorized)
             let signed = try await post(app, signedBy: key)
@@ -224,7 +222,7 @@ struct EventarcAuthMiddlewareTests {
 
     @Test("the emulator bypass lets an unauthenticated request through")
     func emulatorBypass() async throws {
-        try await withApp(EventarcAuthMiddleware(oidc: nil, bypassInEmulator: true)) { app in
+        try await withApp(EventarcAuthenticator(oidc: nil, bypassInEmulator: true)) { app in
             let status = try await post(app, token: nil)
             #expect(status == .ok)
         }
@@ -236,18 +234,18 @@ struct EventarcAuthMiddlewareTests {
         defer { Task { try? await app.asyncShutdown() } }
         let logger = Logger(label: "test")
 
-        let emulator = EventarcAuthMiddleware.make(environment: [:], isEmulator: true, client: app.client, logger: logger)
+        let emulator = EventarcAuthenticator.make(environment: [:], isEmulator: true, client: app.client, logger: logger)
         #expect(emulator.bypassInEmulator && emulator.oidc == nil)
 
-        let unconfigured = EventarcAuthMiddleware.make(environment: [:], isEmulator: false, client: app.client, logger: logger)
+        let unconfigured = EventarcAuthenticator.make(environment: [:], isEmulator: false, client: app.client, logger: logger)
         #expect(!unconfigured.bypassInEmulator && unconfigured.oidc == nil)
 
-        let blank = EventarcAuthMiddleware.make(
+        let blank = EventarcAuthenticator.make(
             environment: ["EVENTARC_OIDC_AUDIENCE": ""], isEmulator: false, client: app.client, logger: logger
         )
         #expect(blank.oidc == nil)
 
-        let configured = EventarcAuthMiddleware.make(
+        let configured = EventarcAuthenticator.make(
             environment: ["SCHEDULER_OIDC_AUDIENCE": Self.audience, "EVENTARC_ALLOWED_SERVICE_ACCOUNTS": " a@x.com , b@x.com "],
             isEmulator: false, client: app.client, logger: logger
         )

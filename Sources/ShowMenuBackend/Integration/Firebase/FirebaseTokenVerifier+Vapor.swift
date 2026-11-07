@@ -25,4 +25,9 @@ extension Application {
         }
         set { storage[FirebaseTokenVerifierKey.self] = newValue }
     }
+
+    /// The bearer authenticator for `authenticated` / `admin` contract operations.
+    var firebaseBearerAuthenticator: FirebaseBearerAuthenticator {
+        FirebaseBearerAuthenticator(verifier: firebaseTokenVerifier, logger: logger)
+    }
 }

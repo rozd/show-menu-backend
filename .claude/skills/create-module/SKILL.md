@@ -66,9 +66,10 @@ From the module name and entity, derive all type names:
 | List query | `List{Module}Query` | `ListOrdersQuery` |
 | List query handler | `List{Module}QueryHandler` | `ListOrdersQueryHandler` |
 | Controller | `{Entity}Controller` | `OrderController` |
-| Route | `{Entity}RouteV1` | `OrderRouteV1` |
+| Contract witness | `ContractAPI+{Module}.swift` | `ContractAPI+Orders.swift` |
+| Wire mapper | `{Module}WireMapper` | `OrdersWireMapper` |
 | Firestore collection | `{module}` (lowercased) | `orders` |
-| Route path | `{module}` (lowercased) | `orders` |
+| Contract path (in `show-menu-contracts`) | `/v1/{module}` (lowercased) | `/v1/orders` |
 | URL param | `{entity}Id` (camelCase) | `orderId` |
 
 ## Step 3 — Create Files
@@ -179,22 +180,28 @@ Create these files in order:
 
 #### Presentation Layer
 
-18. **`Presentation/Controller/{Entity}Controller.swift`**
-    - `struct {Entity}Controller: Sendable`
-    - Handlers: `get{Entity}(req:)`, `list{Module}(req:)`, `create{Entity}(req:)`
-    - All marked `@Sendable`
-    - Error handling: domain errors → 400, not found → 404, FirestoreError → 503/500
-    - Reference: `Modules/Catalog/Presentation/Controller/FeatureController.swift`
+**Contract first (hard rule: no hand-written routes).** Before any Presentation file, the operations must exist in `show-menu-contracts/Sources/ShowMenuContracts/openapi.yaml` (PR there, release a tag, bump it in `Package.swift`). If they do not exist yet, stop after the Application layer and tell the user the contract PR is needed. Full rules: `docs/conventions/WireContract.md`.
 
-19. **`Presentation/Route/{Entity}RouteV1.swift`**
-    - `struct {Entity}RouteV1: RouteCollection`
-    - Routes under `"v1", "{module}"` (lowercased)
-    - GET → list, GET `":{entity}Id"` → get, POST → create
-    - Reference: `Modules/Catalog/Presentation/Route/FeatureRouteV1.swift`
+18. **`Presentation/Controller/{Entity}Controller.swift`**
+    - `struct {Entity}Controller: Sendable` — plain type, no Vapor `Request`, not an `APIProtocol` conformer
+    - One method per operation, named after the `operationId`, taking the generated `Operations.X.Input` and returning `Operations.X.Output` (e.g. `func get{Entity}(_ input: Operations.Get{Entity}.Input) async throws -> Operations.Get{Entity}.Output`)
+    - Maps wire ↔ DTO through `{Module}WireMapper` (generated `Components.Schemas.*` / `Operations.*` live only in Presentation)
+    - Errors are **thrown**; `HTTPErrorMapping` renders them (see `docs/conventions/HTTPErrors.md`)
+    - Reference: `Modules/Catalog/Presentation/Controller/PlanController.swift`
+
+19. **`Presentation/ContractAPI+{Module}.swift`**
+    - `extension ContractAPI` with one witness per operation, each building the controller from `app.deps.…` handlers and forwarding the input
+    - Reference: `Modules/Catalog/Presentation/ContractAPI+Catalog.swift`
+    - Add an entry per `Operations.X.id` to `ContractAccessMiddleware.table` (`Integration/Vapor/ContractAccessMiddleware.swift`): `.public`, `.authenticated` or `.admin`. An unlisted operation fails closed with 401.
+
+20. **`Presentation/{Module}WireMapper.swift`**
+    - Static functions DTO ↔ generated wire types. Reference: `Modules/Catalog/Presentation/CatalogWireMapper.swift`
+
+21. **`Tests/ShowMenuBackendTests/Unit/Modules/{Module}/{Entity}ControllerTests.swift`** — controller unit test: build the controller with `InMemoryDataSource` + `StubUnitOfWork`, call it with a generated `Input`, assert on the generated `Output` and on thrown errors. Reference: `Tests/ShowMenuBackendTests/Unit/Modules/Catalog/PlanControllerTests.swift`
 
 #### Integration
 
-20. **`{Module}+Vapor.swift`**
+22. **`{Module}+Vapor.swift`** (only if the module still needs `Content` conformances for its DTOs; wire types do not)
     - `import Vapor` + `extension {Entity}DTO: Content {}`
     - Reference: `Modules/Catalog/Catalog+Vapor.swift`
 
@@ -203,7 +210,7 @@ Create these files in order:
 For each additional use case beyond Create (e.g., Update, Delete):
 - Create `{Action}{Entity}Command.swift` and `Handler/{Action}{Entity}CommandHandler.swift`
 - Create `{Action}{Entity}UseCase.swift`
-- Add the handler to the Controller and Route
+- Add the operation to `show-menu-contracts` first, then the Controller method, the `ContractAPI+{Module}.swift` witness and the `ContractAccessMiddleware.table` entry
 - Create corresponding test file
 
 ## Step 4 — Create Tests
@@ -248,7 +255,7 @@ For each use case, create `{Action}{Entity}UseCaseTests.swift`:
 After creating all files, output:
 
 1. **Created files** — list all files created with their paths
-2. **Wiring instructions** — tell the user exactly what to add to `Vapor+Dependencies.swift`, the new `CompositionRoot+{Module}.swift`, and `routes.swift`:
+2. **Wiring instructions** — tell the user exactly what to add to `Vapor+Dependencies.swift`, the new `CompositionRoot+{Module}.swift`, and the contract-first HTTP surface:
 
 ### Add to the `Application.Dependencies` protocol in `Vapor+Dependencies.swift`:
 ```swift
@@ -265,16 +272,21 @@ var create{Entity}CommandHandler: Create{Entity}CommandHandler { get }
 ### Create `Modules/{Module}/CompositionRoot+{Module}.swift`:
 An `extension Application.CompositionRoot { … }` holding the full implementation block, following `Modules/Catalog/CompositionRoot+Catalog.swift` (mapper, data source factory, repository factory, use case factory, query handlers, command handler). Never put these resolutions in `Vapor+Dependencies.swift` — see `docs/conventions/CompositionRoot.md`. Repositories take `context: ctx` and resolve their data source via `dataSourceFactory("", context.transaction)` — no separate `transaction:` argument.
 
-### Add to `routes.swift`:
+### Expose the operations (contract first — no `routes.swift` edits):
+1. Add the operations to `show-menu-contracts` (`openapi.yaml`), release a tag, bump the tag in `Package.swift`.
+2. `Presentation/ContractAPI+{Module}.swift` forwards each operation to the controller:
 ```swift
-// {Module}
-let {entity}Controller = {Entity}Controller(
-    get{Entity}QueryHandler: app.deps.get{Entity}QueryHandler,
-    list{Module}QueryHandler: app.deps.list{Module}QueryHandler,
-    create{Entity}CommandHandler: app.deps.create{Entity}CommandHandler
-)
-try app.register(collection: {Entity}RouteV1(controller: {entity}Controller))
+extension ContractAPI {
+    func get{Entity}(_ input: Operations.Get{Entity}.Input) async throws -> Operations.Get{Entity}.Output {
+        try await {Entity}Controller(
+            get{Entity}QueryHandler: app.deps.get{Entity}QueryHandler,
+            list{Module}QueryHandler: app.deps.list{Module}QueryHandler,
+            create{Entity}CommandHandler: app.deps.create{Entity}CommandHandler
+        ).get{Entity}(input)
+    }
+}
 ```
+3. Add each `Operations.X.id` to `ContractAccessMiddleware.table`.
 
 ## Important Rules
 

@@ -11,6 +11,12 @@ jobs:
     container: swift:6.3-noble
     steps:
       - uses: actions/checkout@v4
+      # ShowMenuContracts is a private repo. Pull requests from forks do not receive
+      # secrets, so dependency resolution fails there by design.
+      - name: Authenticate to private contracts package
+        env:
+          SHOWMENU_WORKSPACE_TOKEN: ${{ secrets.SHOWMENU_WORKSPACE_TOKEN }}
+        run: git config --global url."https://x-access-token:${SHOWMENU_WORKSPACE_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Build
         run: swift build
       - name: Test

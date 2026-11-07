@@ -9,10 +9,12 @@ import Vapor
 
 extension CommandMetadata {
 
-    init(req: Request) {
+    /// Request-free metadata for contract controllers: the trace id bound by the trace
+    /// middleware (a fresh one when unbound) and the principal bound by
+    /// `ContractAccessMiddleware` (nil on public operations).
+    init() {
         self.init(
-            correlationId: TraceID(stringLiteral: req.id),
-            // Bound by `FirebaseAuthMiddleware`; nil on public routes.
+            correlationId: RequestContext.traceId ?? TraceID(),
             userId: RequestContext.principal?.id,
             timestamp: .now
         )

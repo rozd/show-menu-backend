@@ -549,7 +549,7 @@ extension Environment {
     }
 
     /// Human-readable build info shared by `GET /version` and
-    /// `GET /api/v1/echo/version`: `v<version>+<build>, revision: <K_REVISION>`.
+    /// `GET /api/v1/version`: `v<version>+<build>, revision: <K_REVISION>`.
     static var buildInfo: String {
         buildInfo(in: ProcessInfo.processInfo.environment)
     }

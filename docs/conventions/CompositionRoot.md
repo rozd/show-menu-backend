@@ -46,7 +46,7 @@ extension Application.CompositionRoot {
 
 Ordered **bottom-up along the dependency graph** — mapper → data source → repository →
 use case → handler — so a reader meets each dependency before its consumer. Controllers
-are not part of the composition root: they are built in `routes.swift`.
+are not part of the composition root: they are built per request in the module's `ContractAPI+<Module>.swift` witness from `app.deps.…` handlers.
 
 Every property is a computed `var` that delegates to the shared cache, keyed by its
 **own** keypath:
@@ -101,8 +101,10 @@ Command handlers get `unitOfWork` instead.
    `App/Vapor+Dependencies.swift`.
 3. Create `Modules/<Module>/CompositionRoot+<Module>.swift` implementing exactly those.
 4. Wire the module's HTTP surface and events:
-   - Register its routes in `routes.swift`: build the controller from `app.deps.…` handlers
-     and call `try app.register(collection:)`.
+   - Expose its operations contract-first (`docs/conventions/WireContract.md`): add them to
+     `show-menu-contracts`, bump the tag, then add `Presentation/ContractAPI+<Module>.swift`
+     building the controller from `app.deps.…` handlers, plus the access-table entries in
+     `ContractAccessMiddleware`.
    - Add a `<Module>+Vapor.swift` only for the `Content` conformance of its DTOs (as
      `Catalog+Vapor.swift` and `IAM+Vapor.swift` do).
    - If it has integration event handlers, register them in `configure.swift`.
@@ -110,7 +112,7 @@ Command handlers get `unitOfWork` instead.
 There is no migration step.
 
 Removing a module reverses steps 2–4: delete the folder, delete the protocol block,
-delete its block in `routes.swift`, and delete its registrations in `configure.swift`.
+delete its `ContractAPI+<Module>.swift` witness (and its operations from the contract), and delete its registrations in `configure.swift`.
 Nothing else changes. The IAM sample is fenced by `// USER_LIFECYCLE_BEGIN` /
-`// USER_LIFECYCLE_END` markers in `Vapor+Dependencies.swift`, `routes.swift` and
+`// USER_LIFECYCLE_END` markers in `Vapor+Dependencies.swift` and
 `configure.swift`, which show exactly what to remove.

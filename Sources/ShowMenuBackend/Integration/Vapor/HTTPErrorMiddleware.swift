@@ -1,3 +1,4 @@
+import OpenAPIRuntime
 import Vapor
 
 // MARK: - Envelope
@@ -51,6 +52,21 @@ struct HTTPErrorMapping: Equatable {
 
     static func map(_ error: any Error) -> HTTPErrorMapping {
         switch error {
+        // The generated server wraps every handler / middleware / decoding failure in a
+        // `ServerError`; the real error is `underlyingError` (a handler's thrown error, a
+        // `DecodingError` for a malformed body, or the runtime's own error for a missing body /
+        // parameter, which `OpenAPIRuntime` keeps `internal`).
+        case let e as ServerError:
+            let inner = map(e.underlyingError)
+            // A runtime-originated 4xx (missing body, bad parameter, unsupported content type)
+            // is not one of ours, so it fell through to the 500 default: map it by its status.
+            if inner.status == .internalServerError, inner.code == "internal_error",
+               e.underlyingError is any HTTPResponseConvertible, (400..<500).contains(e.httpStatus.code) {
+                let status = HTTPResponseStatus(statusCode: e.httpStatus.code)
+                return .init(status, code(for: status), e.causeDescription)
+            }
+            return inner
+
         // Domain / application layer
         case let e as ApplicationError:
             switch e {
@@ -166,10 +182,17 @@ struct HTTPErrorMiddleware: AsyncMiddleware {
         }
     }
 
+    /// A log-safe description. `ServerError`'s own description embeds the whole request, including
+    /// the `Authorization` header, so log the operation and the underlying error instead.
+    static func loggable(_ error: any Error) -> String {
+        guard let serverError = error as? ServerError else { return String(describing: error) }
+        return "\(serverError.operationID): \(loggable(serverError.underlyingError))"
+    }
+
     static func response(for error: any Error, on request: Request) -> Response {
         let mapping = HTTPErrorMapping.map(error)
         let meta: Logger.Metadata = [
-            "error": .string(String(describing: error)),
+            "error": .string(loggable(error)),
             "status": .stringConvertible(mapping.status.code),
         ]
         if mapping.isServerFault {

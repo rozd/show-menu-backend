@@ -1,4 +1,6 @@
 import Foundation
+import HTTPTypes
+import OpenAPIRuntime
 import Testing
 import Vapor
 import VaporTesting
@@ -10,6 +12,13 @@ struct HTTPErrorMiddlewareTests {
     private struct SomeDomainError: DomainError {}
     private struct SomeValidationError: ValidationError {}
     private struct Unknown: Error {}
+    private struct AnyCodingKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
 
     @Test("mapping table", arguments: [
         (ApplicationError.notFound(entity: "Feature", id: Feature.Id(rawValue: "x")) as any Error, 404, "not_found"),
@@ -36,6 +45,83 @@ struct HTTPErrorMiddlewareTests {
         let m = HTTPErrorMapping.map(error)
         #expect(m.status.code == UInt(status))
         #expect(m.code == code)
+    }
+
+    // MARK: Generated server (`ServerError`) unwrapping
+
+    /// What the generated server throws: the real error wrapped with the request context.
+    private func serverError(wrapping error: any Error, status: HTTPResponse.Status = .internalServerError) -> ServerError {
+        ServerError(
+            operationID: "op",
+            request: HTTPRequest(method: .get, scheme: nil, authority: nil, path: "/v1/x"),
+            requestBody: nil,
+            requestMetadata: .init(),
+            causeDescription: "Test cause",
+            underlyingError: error,
+            httpStatus: status,
+            httpHeaderFields: [:],
+            httpBody: nil
+        )
+    }
+
+    /// Stands in for the runtime's `internal` `RuntimeError` (missing body / bad parameter).
+    private struct RuntimeLike: Error, HTTPResponseConvertible {
+        var httpStatus: HTTPResponse.Status { .badRequest }
+        var httpHeaderFields: HTTPFields { [:] }
+        var httpBody: HTTPBody? { nil }
+    }
+
+    @Test("a ServerError wrapping a DecodingError is a 400 bad_request")
+    func serverErrorDecoding() {
+        let wrapped = serverError(wrapping: DecodingError.keyNotFound(
+            AnyCodingKey("name"), .init(codingPath: [], debugDescription: "x")
+        ))
+        let m = HTTPErrorMapping.map(wrapped)
+        #expect(m.status == .badRequest)
+        #expect(m.code == "bad_request")
+        #expect(m.details?.first?.message == "Missing required field 'name'")
+    }
+
+    @Test("a ServerError wrapping a DomainError is a 409; other layers are unwrapped too")
+    func serverErrorDomain() {
+        #expect(HTTPErrorMapping.map(serverError(wrapping: SomeDomainError())).status == .conflict)
+        #expect(HTTPErrorMapping.map(serverError(wrapping: SomeDomainError())).code == "domain_rule_violation")
+        #expect(HTTPErrorMapping.map(serverError(wrapping: SomeValidationError())).status == .unprocessableEntity)
+        #expect(HTTPErrorMapping.map(serverError(wrapping: ApplicationError.notFound(entity: "Plan", id: Plan.Id(rawValue: "p")))).code == "not_found")
+        #expect(HTTPErrorMapping.map(serverError(wrapping: AuthorizationError.denied(reason: "no"))).status == .forbidden)
+        #expect(HTTPErrorMapping.map(serverError(wrapping: Abort(.notFound), status: .notFound)).code == "not_found")
+        // Nested.
+        #expect(HTTPErrorMapping.map(serverError(wrapping: serverError(wrapping: SomeDomainError()))).status == .conflict)
+    }
+
+    @Test("a runtime-originated 4xx (missing body, bad parameter) is mapped by its status")
+    func serverErrorRuntime() {
+        let m = HTTPErrorMapping.map(serverError(wrapping: RuntimeLike(), status: .badRequest))
+        #expect(m.status == .badRequest)
+        #expect(m.code == "bad_request")
+        #expect(m.message == "Test cause")
+    }
+
+    @Test("the logged form of a ServerError never contains request headers (bearer tokens)")
+    func serverErrorLogDoesNotLeakCredentials() {
+        var headers = HTTPFields()
+        headers[.authorization] = "Bearer super-secret-token"
+        let error = ServerError(
+            operationID: "listPlans",
+            request: HTTPRequest(method: .get, scheme: nil, authority: nil, path: "/v1/plans", headerFields: headers),
+            requestBody: nil, requestMetadata: .init(),
+            causeDescription: "c", underlyingError: Unknown()
+        )
+        let logged = HTTPErrorMiddleware.loggable(error)
+        #expect(!logged.contains("super-secret-token"))
+        #expect(logged.hasPrefix("listPlans:"))
+    }
+
+    @Test("a ServerError wrapping an unknown error stays a 500 that does not leak")
+    func serverErrorUnknown() {
+        let m = HTTPErrorMapping.map(serverError(wrapping: Unknown()))
+        #expect(m.status == .internalServerError)
+        #expect(m.message == "Internal server error")
     }
 
     @Test("internal errors never leak their description")

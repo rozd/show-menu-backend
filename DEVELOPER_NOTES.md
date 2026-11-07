@@ -5,7 +5,7 @@ Technical reference for developers working on this codebase. For setup and deplo
 ## Request Flow
 
 ```
-Route → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Firestore
+Generated route (registerHandlers) → ContractAPI witness → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Firestore
 ```
 
 **Reads (Queries)** skip UnitOfWork — no transaction needed:
@@ -156,12 +156,12 @@ Each `GCPAuthProvider` implements `func getAccessToken() async throws -> String?
 
 - `PubSubClient` — publish / ensure-topic / ensure-subscription protocol; `GCPPubSubClient` (REST) + `InMemoryPubSubClient` (test double).
 - `PubSubIntegrationEventChannel` — an `IntegrationEventChannel` that serializes integration events to Pub/Sub messages.
-- `PubSubPushController` + `PubSubPushRouteV1` — receive Pub/Sub **push** deliveries (`POST`), decode the envelope, and dispatch the integration event (always return 200 to prevent retries). Building block; not wired by default.
+- `PubSubPushController` — decodes Pub/Sub **push** deliveries (no route: it is not in the OpenAPI contract, so it is not exposed until an operation is added there), decode the envelope, and dispatch the integration event (always return 200 to prevent retries). Building block; not wired by default.
 
 ### Eventarc (`Integration/Eventarc/`)
 
 - `CloudEventsParser` — parses CloudEvents headers (`ce-type`, `ce-source`, `ce-subject`, etc.) from incoming webhooks.
-- `EventarcWebhookController` — routes CloudEvents to registered `IntegrationEventHandler`s.
+- `EventarcController` (`Modules/IAM/Presentation/Controller/`) — serves `POST /api/v1/events/eventarc` (operation `handleEventarcEvent`), turning CloudEvents into integration events. Authentication: `EventarcAuthenticator`, applied by `ContractAccessMiddleware`.
 - Supports Firebase Auth triggers (user created/deleted) out of the box.
 
 ### Integration Events
@@ -188,7 +188,7 @@ Two registration points are needed:
 
 4. **Application layer** — DTO, Mapper, DataSource protocol, Command + Handler, Query + Handler, UseCase
 
-5. **Presentation layer** — Controller, RouteCollection
+5. **Presentation layer** — Controller (generated `Operations.X.Input/Output`), `ContractAPI+{Module}.swift` witness, wire mapper. Define the operations in `show-menu-contracts` first; see `docs/conventions/WireContract.md`
 
 6. **Vapor integration** — `{Module}+Vapor.swift` with `extension {Entity}DTO: Content {}`
 
@@ -204,15 +204,7 @@ Two registration points are needed:
    var createEntityCommandHandler: CreateEntityCommandHandler { get }
    ```
 
-8. **Register routes** in `routes.swift`:
-   ```swift
-   let entityController = EntityController(
-       getEntityQueryHandler: app.deps.getEntityQueryHandler,
-       listEntitiesQueryHandler: app.deps.listEntitiesQueryHandler,
-       createEntityCommandHandler: app.deps.createEntityCommandHandler
-   )
-   try app.register(collection: EntityRouteV1(controller: entityController))
-   ```
+8. **Expose the operations** — contract first: add them to `show-menu-contracts/Sources/ShowMenuContracts/openapi.yaml`, release a tag, bump it in `Package.swift`, then add `Presentation/ContractAPI+{Module}.swift` forwarding to the controller and an entry per operation in `ContractAccessMiddleware.table`. No routes are registered by hand (`docs/conventions/WireContract.md`).
 
 ## Testing
 

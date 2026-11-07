@@ -29,7 +29,7 @@ Skip this question if the module was unambiguously identified from `$ARGUMENTS`.
 
 ### Question 2: Trigger Type
 Ask: "How is this UseCase triggered?" with options:
-- **REST API** — Exposed as an HTTP endpoint (Command + CommandHandler + Controller route)
+- **REST API** — Exposed as an HTTP endpoint (Command + CommandHandler + Controller + contract operation)
 - **Domain Event** — Reacts to an event from within this bounded context (DomainEventHandler)
 - **Integration Event** — Reacts to a cross-context event, e.g., from Eventarc or another module (IntegrationEventHandler)
 - **Internal** — Called only by other UseCases or services, no external trigger
@@ -64,7 +64,7 @@ Before generating code, read the module's existing files to understand its types
 5. Read `Modules/{Module}/Application/Mapper/{Entity}Mapper.swift` → get mapper name
 6. Read `Modules/{Module}/Application/DTO/{Entity}DTO.swift` → get DTO type
 7. Read `Modules/{Module}/Infrastructure/Model/{Entity}Model.swift` → get model type
-8. If REST API trigger: read `Modules/{Module}/Presentation/Controller/{Entity}Controller.swift` and `Modules/{Module}/Presentation/Route/{Entity}RouteV1.swift`
+8. If REST API trigger: read `Modules/{Module}/Presentation/Controller/{Entity}Controller.swift` and `Modules/{Module}/Presentation/ContractAPI+{Module}.swift` (confirm the operation already exists in `show-menu-contracts`; see `docs/conventions/WireContract.md`)
 
 This gives you all the concrete type names to use in generated code.
 
@@ -79,7 +79,7 @@ This gives you all the concrete type names to use in generated code.
 | Command Handler | `{Action}{Entity}CommandHandler` | `ArchiveFeatureCommandHandler` |
 | Domain Event Handler | `{Action}On{Entity}{EventKind}Handler` | `ArchiveOnFeatureCreatedHandler` |
 | Integration Event Handler | `{Action}On{IntegrationEvent}Handler` | `ArchiveOnUserDeletedHandler` |
-| Controller method | `{action}{Entity}(req:)` | `archiveFeature(req:)` |
+| Controller method | `{action}{Entity}(_ input:)` | `archiveFeature(_:)` |
 | Test suite | `{Action}{Entity}UseCaseTests` | `ArchiveFeatureUseCaseTests` |
 | Domain event kind | `.{entity}{Action}d` or `.{entity}{Action}ed` | `.featureArchived` |
 
@@ -163,31 +163,33 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
 
    - Reference: `Modules/Catalog/Application/Command/Handler/CreateFeatureCommandHandler.swift`
 
-4. **Update `Presentation/Controller/{Entity}Controller.swift`** — Add a new property for the command handler and a new endpoint method:
+4. **Contract first (hard rule: no hand-written routes).** The operation must already be defined in `show-menu-contracts/Sources/ShowMenuContracts/openapi.yaml` (PR there, release a tag, bump it in `Package.swift`). If it is not, stop and tell the user the contract PR is needed before the HTTP surface can be added; the UseCase/Command/Handler can still be created. See `docs/conventions/WireContract.md`.
+
+5. **Update `Presentation/Controller/{Entity}Controller.swift`** — Add a new property for the command handler and a method named after the `operationId`, taking the generated `Input` and returning the generated `Output` (no Vapor `Request`):
 
    ```swift
    // Add property:
    let {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler
 
    // Add method:
-   @Sendable
-   func {action}{Entity}(req: Request) async throws -> Response {
-       // Decode payload, create command, call handler, return response
+   func {action}{Entity}(_ input: Operations.{Action}{Entity}.Input) async throws -> Operations.{Action}{Entity}.Output {
+       // Map wire -> command via {Module}WireMapper, call the handler, map DTO -> wire, return .ok(.init(body: .json(...)))
    }
    ```
 
-   - For Update/Delete: extract `{entity}Id` from `req.parameters.get("{entity}Id")`
-   - Error handling: domain errors → 400, not found → 404, FirestoreError → 503/500
-   - Reference: `FeatureController.createFeature(req:)`
+   - Path/query values come from `input.path.*` / `input.query.*`; the body from `input.body` (`guard case let .json(body)`)
+   - Errors are **thrown** (domain errors, `ApplicationError.notFound`, …); `HTTPErrorMapping` renders them (400/404/409/422/503); do not catch them to build responses
+   - Reference: `PlanController` (`Modules/Catalog/Presentation/Controller/PlanController.swift`)
 
-5. **Update `Presentation/Route/{Entity}RouteV1.swift`** — Add the new route:
+6. **Update `Presentation/ContractAPI+{Module}.swift`** — add the witness forwarding to the controller, and add the operation's `Operations.X.id` to `ContractAccessMiddleware.table` (an unlisted operation fails closed with 401):
 
    ```swift
-   // For Create-like: {module}.post("subresource", use: controller.{action}{Entity})
-   // For Update: {module}.put(":{entity}Id", use: controller.{action}{Entity})
-   // For Delete: {module}.delete(":{entity}Id", use: controller.{action}{Entity})
-   // For Custom: choose appropriate HTTP method and path
+   func {action}{Entity}(_ input: Operations.{Action}{Entity}.Input) async throws -> Operations.{Action}{Entity}.Output {
+       try await {Entity}Controller(/* handlers from app.deps */).{action}{Entity}(input)
+   }
    ```
+
+7. **Add a controller unit test** (`Tests/ShowMenuBackendTests/Unit/Modules/{Module}/{Entity}ControllerTests.swift`): build the controller with `InMemoryDataSource` + `StubUnitOfWork`, call it with a generated `Input`, assert the generated `Output` and thrown errors. Reference: `Tests/ShowMenuBackendTests/Unit/Modules/Catalog/PlanControllerTests.swift`
 
 ---
 
@@ -351,8 +353,8 @@ Reference: `Tests/{APP_NAME}Tests/Unit/Modules/Catalog/FeatureUseCaseTests.swift
 After creating all files, output:
 
 1. **Created files** — list with paths
-2. **Modified files** — list files that were edited (Controller, Route, EventKind enum)
-3. **Wiring instructions** — what the user must add to `Vapor+Dependencies.swift` and optionally `routes.swift`:
+2. **Modified files** — list files that were edited (Controller, ContractAPI witness, access table, EventKind enum)
+3. **Wiring instructions** — what the user must add to `Vapor+Dependencies.swift` (HTTP routes come from the contract; `routes.swift` is never edited):
 
 ### For REST API trigger, add to the `Application.Dependencies` protocol:
 ```swift
@@ -386,9 +388,10 @@ var {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler {
 }
 ```
 
-### For REST API trigger, update `routes.swift`:
-- Add the new command handler to the Controller constructor
-- The route was already added by editing `{Entity}RouteV1`
+### For REST API trigger, update the HTTP surface (contract first):
+- The operation must exist in `show-menu-contracts` and the tag be bumped in `Package.swift`
+- Pass the new command handler from the `ContractAPI+{Module}.swift` witness to the Controller constructor
+- Add the operation to `ContractAccessMiddleware.table`
 
 ### For Domain Event trigger, add to Dependencies and register handler:
 ```swift
@@ -410,5 +413,5 @@ var {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler {
 - **Imports**: Only import what's needed. Application layer imports `Foundation` and `Logging`.
 - **Logging**: Use structured logging with metadata. Info level for use case execution, debug for operations, error for failures.
 - **Write constraints**: Only write files into `Sources/{APP_NAME}/Modules/{Module}/` and `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
-- **Existing code**: When editing Controller or Route files, preserve all existing code. Only add new properties, methods, and routes.
+- **Existing code**: When editing Controller or ContractAPI witness files, preserve all existing code. Only add new properties, methods, and witnesses.
 - **Generate working code**: Based on the user's answers, generate complete, compilable code — not stubs with TODO comments. Infer reasonable implementations from the action verb and context.

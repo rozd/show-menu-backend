@@ -2,7 +2,7 @@ import Foundation
 
 /// Integration event published when a Firebase Auth user is created.
 ///
-/// Published by `EventarcWebhookController.handleUserCreated()` upon receiving
+/// Published by `EventarcController.handleUserCreated()` upon receiving
 /// a `google.firebase.auth.user.v1.created` CloudEvent forwarded by the
 /// auth-forwarder Cloud Function. Consumed by `UserCreatedIntegrationEventHandler`.
 struct UserCreatedIntegrationEvent: IntegrationEvent {

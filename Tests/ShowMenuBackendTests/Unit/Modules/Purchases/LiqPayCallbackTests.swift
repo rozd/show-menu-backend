@@ -429,19 +429,16 @@ struct LiqPayCallbackTests {
 
     // MARK: HTTP edge
 
+    /// The real contract wiring, with the callback's gateway and handler swapped for the test doubles.
     private func withApp(_ sut: SUT, _ body: (Application) async throws -> Void) async throws {
-        let app = try await Application.make(.testing)
-        do {
-            app.useErrorEnvelope()
-            let gateway = FakePaymentGateway(configuration: LiqPayFixtures.configuration())
-            let controller = PaymentCallbackController(gateway: gateway, handler: sut.handler)
-            try app.grouped("api").register(collection: PaymentCallbackRouteV1(controller: controller))
+        try await ContractTestApp.with { app in
+            let gateway: any PaymentGateway = FakePaymentGateway(configuration: LiqPayFixtures.configuration())
+            ContractTestApp.override(app, Partial<any Application.Dependencies>([
+                \.paymentGateway: gateway,
+                \.handleLiqPayCallbackCommandHandler: sut.handler,
+            ]))
             try await body(app)
-        } catch {
-            try await app.asyncShutdown()
-            throw error
         }
-        try await app.asyncShutdown()
     }
 
     private func form(_ fields: [(String, String)]) -> ByteBuffer {

@@ -12,15 +12,26 @@
 #      Start app: docker compose up app
 #       Stop all: docker compose down
 #
+# The build needs read access to the private show-menu-contracts repo. Export a
+# fine-grained read-only PAT first (it is passed as a BuildKit secret, never
+# baked into the image):
+#   export GITHUB_CONTRACTS_TOKEN=github_pat_...
+#
 
 x-shared_environment: &shared_environment
   LOG_LEVEL: ${LOG_LEVEL:-debug}
+
+secrets:
+  github_token:
+    environment: GITHUB_CONTRACTS_TOKEN
 
 services:
   app:
     image: show-menu-backend:latest
     build:
       context: .
+      secrets:
+        - github_token
     environment:
       <<: *shared_environment
     ports:
