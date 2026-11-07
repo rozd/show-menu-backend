@@ -18,6 +18,10 @@ jobs:
     #   github.event.pull_request.user.login == 'new-developer' ||
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
+    # Skip bot-authored PRs (the release-please release PR): claude-code-action
+    # refuses bot actors, and a changelog/version bump needs no code review.
+    if: github.event.pull_request.user.type != 'Bot'
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
