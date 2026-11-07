@@ -1,6 +1,7 @@
+import ShowMenuContracts
 import Vapor
 
-/// Admin-only plan endpoints. Errors are thrown as typed errors and rendered by
+/// Admin-only plan operations. Errors are thrown as typed errors and rendered by
 /// `HTTPErrorMiddleware` (`Plan.Error` → 422, `PlanSKUAlreadyExistsError` → 409,
 /// `ApplicationError.notFound` → 404).
 struct PlanController: Sendable {
@@ -14,92 +15,75 @@ struct PlanController: Sendable {
     let addPlanFeatureCommandHandler: AddPlanFeatureCommandHandler
     let removePlanFeatureCommandHandler: RemovePlanFeatureCommandHandler
 
-    /// `POST /api/v1/plans` → 200 `PlanResponse` (Node answers 200, not 201).
-    @Sendable
-    func createPlan(req: Request) async throws -> PlanDTO {
-        let payload = try req.content.decode(CreatePlanCommand.Payload.self)
-        return try await createPlanCommandHandler.handle(CreatePlanCommand(
-            payload: payload,
-            metadata: CommandMetadata(req: req)
+    /// `createPlan` → 200 `Plan` (Node answers 200, not 201).
+    func createPlan(_ input: Operations.CreatePlan.Input) async throws -> Operations.CreatePlan.Output {
+        guard case let .json(body) = input.body else { throw Abort(.badRequest, reason: "Unsupported request body") }
+        let dto = try await createPlanCommandHandler.handle(CreatePlanCommand(
+            payload: CatalogWireMapper.payload(body),
+            metadata: CommandMetadata()
         ))
+        return .ok(.init(body: .json(try CatalogWireMapper.wire(dto))))
     }
 
-    /// `GET /api/v1/plans/:id` → 200 `PlanResponse`; unknown id → 404.
-    @Sendable
-    func getPlan(req: Request) async throws -> PlanDTO {
-        guard let planId = req.parameters.get("planId") else {
-            throw Abort(.badRequest, reason: "Missing planId parameter")
-        }
-        return try await getPlanQueryHandler.handle(GetPlanQuery(planId: planId))
+    /// `getPlan` → 200 `Plan`; unknown id → 404.
+    func getPlan(_ input: Operations.GetPlan.Input) async throws -> Operations.GetPlan.Output {
+        let dto = try await getPlanQueryHandler.handle(GetPlanQuery(planId: input.path.planId))
+        return .ok(.init(body: .json(try CatalogWireMapper.wire(dto))))
     }
 
-    /// `GET /api/v1/plans` → 200 `[PlanResponse]`.
-    @Sendable
-    func listPlans(req: Request) async throws -> [PlanDTO] {
-        try await listPlansQueryHandler.handle(ListPlansQuery())
+    /// `listPlans` → 200 `[Plan]` (a bare array).
+    func listPlans(_ input: Operations.ListPlans.Input) async throws -> Operations.ListPlans.Output {
+        let dtos = try await listPlansQueryHandler.handle(ListPlansQuery())
+        return .ok(.init(body: .json(try dtos.map(CatalogWireMapper.wire))))
     }
 
-    private func planId(_ req: Request) throws -> String {
-        guard let planId = req.parameters.get("planId") else {
-            throw Abort(.badRequest, reason: "Missing planId parameter")
-        }
-        return planId
-    }
-
-    /// `PUT /api/v1/plans/:id` → 200 `PlanResponse`.
-    @Sendable
-    func updatePlan(req: Request) async throws -> PlanDTO {
-        let payload = try req.content.decode(UpdatePlanCommand.Payload.self)
-        return try await updatePlanCommandHandler.handle(UpdatePlanCommand(
-            planId: try planId(req),
-            payload: payload,
-            metadata: CommandMetadata(req: req)
+    /// `updatePlan` → 200 `Plan`.
+    func updatePlan(_ input: Operations.UpdatePlan.Input) async throws -> Operations.UpdatePlan.Output {
+        guard case let .json(body) = input.body else { throw Abort(.badRequest, reason: "Unsupported request body") }
+        let dto = try await updatePlanCommandHandler.handle(UpdatePlanCommand(
+            planId: input.path.planId,
+            payload: CatalogWireMapper.payload(body),
+            metadata: CommandMetadata()
         ))
+        return .ok(.init(body: .json(try CatalogWireMapper.wire(dto))))
     }
 
-    /// `PUT /api/v1/plans/:id/activate` → 200, empty body; idempotent.
-    @Sendable
-    func activatePlan(req: Request) async throws -> HTTPStatus {
+    /// `activatePlan` → 200, empty body; idempotent.
+    func activatePlan(_ input: Operations.ActivatePlan.Input) async throws -> Operations.ActivatePlan.Output {
         try await activatePlanCommandHandler.handle(ActivatePlanCommand(
-            planId: try planId(req),
-            metadata: CommandMetadata(req: req)
+            planId: input.path.planId,
+            metadata: CommandMetadata()
         ))
-        return .ok
+        return .ok(.init())
     }
 
-    /// `PUT /api/v1/plans/:id/deactivate` → 200, empty body; idempotent.
-    @Sendable
-    func deactivatePlan(req: Request) async throws -> HTTPStatus {
+    /// `deactivatePlan` → 200, empty body; idempotent.
+    func deactivatePlan(_ input: Operations.DeactivatePlan.Input) async throws -> Operations.DeactivatePlan.Output {
         try await deactivatePlanCommandHandler.handle(DeactivatePlanCommand(
-            planId: try planId(req),
-            metadata: CommandMetadata(req: req)
+            planId: input.path.planId,
+            metadata: CommandMetadata()
         ))
-        return .ok
+        return .ok(.init())
     }
 
-    /// `PUT /api/v1/plans/:id/features` → 200 `PlanResponse`.
-    @Sendable
-    func addFeature(req: Request) async throws -> PlanDTO {
-        let payload = try req.content.decode(AddPlanFeatureCommand.Payload.self)
-        return try await addPlanFeatureCommandHandler.handle(AddPlanFeatureCommand(
-            planId: try planId(req),
-            payload: payload,
-            metadata: CommandMetadata(req: req)
+    /// `addPlanFeature` → 200 `Plan`.
+    func addPlanFeature(_ input: Operations.AddPlanFeature.Input) async throws -> Operations.AddPlanFeature.Output {
+        guard case let .json(body) = input.body else { throw Abort(.badRequest, reason: "Unsupported request body") }
+        let dto = try await addPlanFeatureCommandHandler.handle(AddPlanFeatureCommand(
+            planId: input.path.planId,
+            payload: CatalogWireMapper.payload(body),
+            metadata: CommandMetadata()
         ))
+        return .ok(.init(body: .json(try CatalogWireMapper.wire(dto))))
     }
 
-    /// `DELETE /api/v1/plans/:id/features/:featureId` → 200, empty body; 404 if the
-    /// feature is not in the plan.
-    @Sendable
-    func removeFeature(req: Request) async throws -> HTTPStatus {
-        guard let featureId = req.parameters.get("featureId") else {
-            throw Abort(.badRequest, reason: "Missing featureId parameter")
-        }
+    /// `removePlanFeature` → 200, empty body; 404 if the feature is not in the plan.
+    func removePlanFeature(_ input: Operations.RemovePlanFeature.Input) async throws -> Operations.RemovePlanFeature.Output {
         try await removePlanFeatureCommandHandler.handle(RemovePlanFeatureCommand(
-            planId: try planId(req),
-            featureId: featureId,
-            metadata: CommandMetadata(req: req)
+            planId: input.path.planId,
+            featureId: input.path.featureId,
+            metadata: CommandMetadata()
         ))
-        return .ok
+        return .ok(.init())
     }
 }

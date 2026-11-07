@@ -1,5 +1,6 @@
 import CryptoExtras
 import Foundation
+import HTTPTypes
 import JWT
 import JWTKit
 import Logging
@@ -342,39 +343,16 @@ struct FirebaseAuthTests {
         #expect(FirebasePrincipal(token: Self.claims(sub: "abc")).id == "abc")
     }
 
-    // MARK: HTTP guards
+    // MARK: HTTP guards (real contract routes; no handler is reached)
 
     private func withApp(
         server: FakeJWKS, _ body: (Application) async throws -> Void
     ) async throws {
-        let app = try await Application.make(.testing)
-        do {
-            app.useErrorEnvelope()
-            let verifier = Self.verifier(server)
-            let authenticated = app.grouped("api").grouped(FirebaseAuthMiddleware(verifier: verifier))
-            let admin = authenticated.grouped(RequireAdminMiddleware())
-            try admin.register(collection: PlansGuardRouteV1())
-            // Stand-in for the Catalog module's `GET /plans` (S05): the guard only
-            // covers paths below `/plans`, the module owns `/plans` itself.
-            admin.get("v1", "plans") { _ async -> [String] in [] }
-            authenticated.get("v1", "whoami") { _ async -> String in
-                RequestContext.principal?.id ?? "none"
-            }
-            authenticated.get("v1", "metadata") { req async -> String in
-                CommandMetadata(req: req).userId ?? "none"
-            }
-            try await body(app)
-        } catch {
-            try await app.asyncShutdown()
-            throw error
-        }
-        try await app.asyncShutdown()
+        try await ContractTestApp.with(verifier: Self.verifier(server), body)
     }
 
     private func bearer(_ token: String) -> HTTPHeaders {
-        var headers = HTTPHeaders()
-        headers.bearerAuthorization = .init(token: token)
-        return headers
+        ContractTestApp.bearer(token)
     }
 
     private func errorCode(_ res: TestingHTTPResponse) throws -> String {
@@ -407,6 +385,7 @@ struct FirebaseAuthTests {
             for token in tokens {
                 try await app.test(.GET, "api/v1/plans", headers: bearer(token)) { res async throws in
                     #expect(res.status == .unauthorized)
+                    #expect(try errorCode(res) == "unauthorized")
                 }
             }
         }
@@ -424,84 +403,79 @@ struct FirebaseAuthTests {
         }
     }
 
-    @Test("non-admin on /plans (including unmatched paths) → 403")
+    @Test("non-admin on an admin operation → 403")
     func nonAdminForbidden() async throws {
         let k1 = try TestKey(kid: "k1")
         try await withApp(server: FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))) { app in
             let token = try await k1.sign(Self.claims())
-            for path in ["api/v1/plans", "api/v1/plans/non-existent-plan"] {
-                try await app.test(.GET, path, headers: bearer(token)) { res async throws in
-                    #expect(res.status == .forbidden)
+            for (method, path) in [(HTTPMethod.GET, "api/v1/plans"), (.GET, "api/v1/plans/some-plan"), (.PUT, "api/v1/plans/some-plan/activate")] {
+                try await app.test(method, path, headers: bearer(token)) { res async throws in
+                    #expect(res.status == .forbidden, "\(method) \(path)")
                     #expect(try errorCode(res) == "forbidden")
                 }
             }
         }
     }
 
-    @Test("admin passes the guard: stub list is 200, unmatched path is 404")
+    @Test("an admin passes the guard: the request reaches body decoding (400), not 401/403")
     func adminAllowed() async throws {
         let k1 = try TestKey(kid: "k1")
         try await withApp(server: FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))) { app in
             let token = try await k1.sign(Self.claims(admin: true))
-            try await app.test(.GET, "api/v1/plans", headers: bearer(token)) { res async throws in
-                #expect(res.status == .ok)
-                #expect(res.body.string == "[]")
-            }
-            try await app.test(.GET, "api/v1/plans/non-existent-plan", headers: bearer(token)) { res async throws in
-                #expect(res.status == .notFound)
+            var headers = bearer(token)
+            headers.contentType = .json
+            try await app.test(.POST, "api/v1/plans", headers: headers, body: ByteBuffer(string: "{ not json")) { res async throws in
+                #expect(res.status == .badRequest)
+                #expect(try errorCode(res) == "bad_request")
             }
         }
     }
 
-    @Test("guard covers every method on unmatched /plans paths: anonymous 401, non-admin 403, admin 404")
-    func guardCoversAllMethods() async throws {
+    @Test("paths that are not contract operations are 404 for everyone (no catch-all guard)")
+    func unmatchedPathsAreNotFound() async throws {
         let k1 = try TestKey(kid: "k1")
         try await withApp(server: FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))) { app in
             let user = try await k1.sign(Self.claims())
             let admin = try await k1.sign(Self.claims(admin: true))
-            let methods: [HTTPMethod] = [.POST, .PUT, .PATCH, .DELETE]
-            for method in methods {
-                for path in ["api/v1/plans/unknown", "api/v1/plans/unknown/deeper/path"] {
-                    try await app.test(method, path) { res async throws in
-                        #expect(res.status == .unauthorized, "\(method) \(path) anonymous")
-                    }
-                    try await app.test(method, path, headers: bearer(user)) { res async throws in
-                        #expect(res.status == .forbidden, "\(method) \(path) non-admin")
-                    }
-                    try await app.test(method, path, headers: bearer(admin)) { res async throws in
-                        #expect(res.status == .notFound, "\(method) \(path) admin")
+            for method in [HTTPMethod.GET, .POST, .PUT, .PATCH, .DELETE] {
+                for path in ["api/v1/plans/unknown/deeper/path", "api/v1/nope"] {
+                    for headers in [HTTPHeaders(), bearer(user), bearer(admin)] {
+                        try await app.test(method, path, headers: headers) { res async throws in
+                            #expect(res.status == .notFound, "\(method) \(path)")
+                            #expect(try errorCode(res) == "not_found")
+                        }
                     }
                 }
             }
-            // The bare collection path, too (stand-in only implements GET).
-            try await app.test(.DELETE, "api/v1/plans") { res async throws in
-                #expect(res.status == .unauthorized)
-            }
         }
     }
 
-    @Test("principal is bound for the request and feeds CommandMetadata.userId")
+    @Test("the principal is bound for the handler and feeds CommandMetadata.userId")
     func principalBound() async throws {
         let k1 = try TestKey(kid: "k1")
-        try await withApp(server: FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))) { app in
-            let token = try await k1.sign(Self.claims(sub: "uid-42"))
-            try await app.test(.GET, "api/v1/whoami", headers: bearer(token)) { res async throws in
-                #expect(res.body.string == "uid-42")
-            }
-            try await app.test(.GET, "api/v1/metadata", headers: bearer(token)) { res async throws in
-                #expect(res.body.string == "uid-42")
-            }
-        }
-    }
+        let server = FakeJWKS(.serve(TestKey.jwks(k1), maxAge: 3600))
+        let access = ContractAccessMiddleware(
+            bearer: FirebaseBearerAuthenticator(verifier: Self.verifier(server), logger: Self.logger),
+            scheduler: SchedulerAuthenticator(apiKey: nil, oidc: nil),
+            eventarc: EventarcAuthenticator(oidc: nil, bypassInEmulator: false)
+        )
+        let token = try await k1.sign(Self.claims(sub: "uid-42"))
+        var headers = HTTPFields()
+        headers[.authorization] = "Bearer \(token)"
+        let request = HTTPRequest(method: .get, scheme: nil, authority: nil, path: "/v1/users/x", headerFields: headers)
 
-    @Test("RequireAdminMiddleware fails closed (401) without a principal")
-    func adminGuardFailsClosed() async throws {
-        let app = try await Application.make(.testing)
-        app.useErrorEnvelope()
-        app.grouped(RequireAdminMiddleware()).get("x") { _ async -> String in "ok" }
-        try await app.test(.GET, "x") { res async throws in
-            #expect(res.status == .unauthorized)
+        let seen = Box<[String?]>([])
+        _ = try await access.intercept(request, body: nil, metadata: .init(), operationID: "getUser") { _, _, _ in
+            seen.value = [RequestContext.principal?.id, CommandMetadata().userId]
+            return (HTTPResponse(status: .ok), nil)
         }
-        try await app.asyncShutdown()
+        #expect(seen.value == ["uid-42", "uid-42"])
+        // Not leaked past the request.
+        #expect(RequestContext.principal == nil)
     }
+}
+
+private final class Box<T: Sendable>: @unchecked Sendable {
+    var value: T
+    init(_ value: T) { self.value = value }
 }

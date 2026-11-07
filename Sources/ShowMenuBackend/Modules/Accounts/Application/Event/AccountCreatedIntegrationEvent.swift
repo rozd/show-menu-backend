@@ -2,7 +2,7 @@ import Foundation
 
 /// Integration event published when a client creates `accounts/{accountId}`.
 ///
-/// Published by `EventarcWebhookController` upon receiving a
+/// Published by `EventarcController` upon receiving a
 /// `google.cloud.firestore.document.v1.created` CloudEvent forwarded by
 /// `firestore-forwarder`. Consumed by two independent, inboxed command handlers:
 /// `LinkAccountToCreator` (IAM) and `GrantAccountOwnerPermission` (Accounts).

@@ -27,6 +27,15 @@ let package = Package(
         // 💳 LiqPay client (signing, status, webhook decoding). Manifest is swift-tools 6.3.
         //    Pinned to a revision; bump deliberately.
         .package(url: "https://github.com/summerhammer/liqpay-client.git", revision: "fcfdf522d121b5c12783a2745803ce9cecc82ddd"),
+        // 📜 The OpenAPI wire contract (generated types + server stubs) — single source of truth for the
+        // HTTP API. Pinned to a **tag**, never a branch: a contract change is a PR in show-menu-contracts
+        // first, then a bump here (see docs/conventions/WireContract.md). Private repo — CI and Docker
+        // resolve it with a read-only token.
+        .package(url: "https://github.com/rozd/show-menu-contracts.git", from: "0.2.0"),
+        // 🧩 Vapor transport for swift-openapi-runtime (`registerHandlers(on: VaporTransport(...))`)
+        .package(url: "https://github.com/swift-server/swift-openapi-vapor.git", from: "1.1.0"),
+        // ⚙️ Runtime library for the generated server code
+        .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.12.0"),
     ],
     targets: [
         .target(
@@ -44,6 +53,9 @@ let package = Package(
                 .product(name: "GoogleAuth", package: "swift-google-auth"),
                 .product(name: "LiqPayClient", package: "liqpay-client"),
                 .product(name: "LiqPayClientVapor", package: "liqpay-client"),
+                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
+                .product(name: "OpenAPIVapor", package: "swift-openapi-vapor"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             // Documentation-only files living next to sources. SwiftPM has no glob
             // for `exclude`, so add new README paths here when introducing them.
@@ -71,6 +83,8 @@ let package = Package(
                 .product(name: "VaporTesting", package: "vapor"),
                 .product(name: "GoogleAuth", package: "swift-google-auth"),
                 .product(name: "LiqPayClient", package: "liqpay-client"),
+                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             swiftSettings: swiftSettings
         ),

@@ -1,40 +1,38 @@
+import OpenAPIRuntime
+import ShowMenuContracts
 import Vapor
 
-/// `POST /api/v1/accounts/:accountId/purchases` -> 200 `text/plain` invoice id (`invoice-...`).
-/// `DELETE /api/v1/accounts/:accountId/purchases/:invoiceId` -> 200 `text/plain` `OK`.
+/// `purchaseSubscription` -> 200 `text/plain` invoice id (`invoice-...`).
+/// `cancelPurchase` -> 200 `text/plain` `OK`.
 /// Errors are typed and rendered by `HTTPErrorMiddleware`.
 struct PurchaseController: Sendable {
 
     let purchaseFlow: PurchaseSubscriptionFlow
     let cancelPurchaseCommandHandler: CancelPurchaseCommandHandler
 
-    @Sendable
-    func purchase(req: Request) async throws -> String {
-        guard let accountId = req.parameters.get("accountId") else {
-            throw Abort(.badRequest, reason: "Missing accountId parameter")
-        }
-        let payload = try req.content.decode(PurchaseSubscriptionCommand.Payload.self)
-        return try await purchaseFlow.run(PurchaseSubscriptionCommand(
-            accountId: accountId,
+    func purchase(
+        _ input: Operations.PurchaseSubscription.Input
+    ) async throws -> Operations.PurchaseSubscription.Output {
+        // `input.headers.idempotencyKey` is deliberately ignored: `IdempotencyKeyMiddleware` is
+        // the source of truth for `Idempotency-Key` (it binds `RequestContext.idempotencyKey`).
+        guard case let .json(body) = input.body else { throw Abort(.badRequest, reason: "Unsupported request body") }
+        let invoiceId = try await purchaseFlow.run(PurchaseSubscriptionCommand(
+            accountId: input.path.accountId,
             customerEmail: (RequestContext.principal as? FirebasePrincipal)?.email,
-            payload: payload,
-            metadata: CommandMetadata(req: req)
+            payload: PurchasesWireMapper.payload(body),
+            metadata: CommandMetadata()
         ))
+        return .ok(.init(body: .plainText(HTTPBody(invoiceId))))
     }
 
-    @Sendable
-    func cancel(req: Request) async throws -> String {
-        guard let accountId = req.parameters.get("accountId") else {
-            throw Abort(.badRequest, reason: "Missing accountId parameter")
-        }
-        guard let invoiceId = req.parameters.get("invoiceId") else {
-            throw Abort(.badRequest, reason: "Missing invoiceId parameter")
-        }
+    func cancel(
+        _ input: Operations.CancelPurchase.Input
+    ) async throws -> Operations.CancelPurchase.Output {
         try await cancelPurchaseCommandHandler.handle(CancelPurchaseCommand(
-            accountId: accountId,
-            invoiceId: invoiceId,
-            metadata: CommandMetadata(req: req)
+            accountId: input.path.accountId,
+            invoiceId: input.path.invoiceId,
+            metadata: CommandMetadata()
         ))
-        return "OK"
+        return .ok(.init(body: .plainText(HTTPBody("OK"))))
     }
 }

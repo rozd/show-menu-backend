@@ -1,7 +1,9 @@
 import Foundation
+import HTTPTypes
+import Logging
 import Vapor
 
-/// Authenticates the machine-to-machine caller of a scheduled job (`POST .../jobs/*`).
+/// Authenticates the machine-to-machine caller of a scheduled job (`checkExpiredSubscriptions`).
 ///
 /// Accepts **either**
 /// - a Google-signed OIDC identity token in `Authorization: Bearer …` (how Cloud Scheduler
@@ -9,11 +11,17 @@ import Vapor
 ///   allow-listed service-account email — all checked by ``GoogleOIDCTokenVerifier``), **or**
 /// - an `X-Api-Key` header equal to `SCHEDULER_API_KEY` (local runs and a shared-secret fallback).
 ///
-/// **Emulator:** verification is skipped, like ``EventarcAuthMiddleware`` (the emulator-mode e2e
+/// **Emulator:** verification is skipped, like ``EventarcAuthenticator`` (the emulator-mode e2e
 /// test calls the job without credentials). **Unconfigured (non-emulator):** with neither a key
 /// nor a verifier every request is denied — secure by default. A JWKS outage is a 503 (the
 /// scheduler retries), not a 401. Neither the key nor a token is ever logged.
-struct SchedulerAuthMiddleware: AsyncMiddleware {
+///
+/// `authenticate(headers:)` completes verification **before** the caller runs the job, and never
+/// wraps it: an error from the job itself propagates as itself, never as a 401 (commit b249fdc).
+struct SchedulerAuthenticator: Sendable {
+
+    /// The `X-Api-Key` header name.
+    static let apiKeyHeader = HTTPField.Name("X-Api-Key")!
 
     /// `SCHEDULER_API_KEY`; `nil` or empty disables the header path.
     let apiKey: String?
@@ -24,40 +32,38 @@ struct SchedulerAuthMiddleware: AsyncMiddleware {
     /// Skip verification entirely (emulator only).
     let bypassInEmulator: Bool
 
-    init(apiKey: String?, oidc: GoogleOIDCTokenVerifier?, bypassInEmulator: Bool = false) {
+    let logger: Logger
+
+    init(apiKey: String?, oidc: GoogleOIDCTokenVerifier?, bypassInEmulator: Bool = false, logger: Logger = Logger(label: "scheduler-auth")) {
         self.apiKey = apiKey
         self.oidc = oidc
         self.bypassInEmulator = bypassInEmulator
+        self.logger = logger
     }
 
-    func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
+    /// Returns normally when the caller is authenticated; throws 401 (or the JWKS outage) otherwise.
+    func authenticate(headers: HTTPFields) async throws {
         if bypassInEmulator {
-            return try await next.respond(to: request)
+            return
         }
 
         if let apiKey, !apiKey.isEmpty,
-           let provided = request.headers.first(name: "X-Api-Key"),
+           let provided = headers[Self.apiKeyHeader],
            Self.constantTimeEquals(provided, apiKey) {
-            return try await next.respond(to: request)
+            return
         }
 
-        if let oidc, let bearer = request.headers.bearerAuthorization {
-            var verified = false
+        if let oidc, let token = headers.bearerToken {
             do {
-                try await oidc.verify(bearer.token)
-                verified = true
+                try await oidc.verify(token)
+                return
             } catch let unavailable as FirebaseJWKSUnavailableError {
                 // Infrastructure failure, not a bad token: let the scheduler retry.
                 throw unavailable
             } catch {
-                request.logger.warning("Scheduler OIDC verification failed", metadata: [
+                logger.warning("Scheduler OIDC verification failed", metadata: [
                     "error": .string(String(describing: error)),
                 ])
-            }
-            // Outside the `do`: an error from the job itself must propagate as itself,
-            // never be logged as a verification failure and turned into a 401.
-            if verified {
-                return try await next.respond(to: request)
             }
         }
 

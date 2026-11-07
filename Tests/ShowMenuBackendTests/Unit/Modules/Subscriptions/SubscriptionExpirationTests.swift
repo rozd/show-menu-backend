@@ -361,12 +361,11 @@ struct SubscriptionExpirationTests {
     @Test("POST /api/v1/subscriptions/jobs/check-expired answers the four-field summary")
     func endpoint() async throws {
         let sut = try await makeSUT(subscriptions: [subscription(-2 * Self.day), subscription(-60)])
-        let app = try await Application.make(.testing)
-        do {
-            app.useErrorEnvelope()
-            try app.grouped("api")
-                .grouped(SchedulerAuthMiddleware(apiKey: "k", oidc: nil))
-                .register(collection: SubscriptionJobRouteV1(controller: SubscriptionJobController(job: sut.job)))
+        let scheduler = SchedulerAuthenticator(apiKey: "k", oidc: nil)
+        try await ContractTestApp.with(scheduler: scheduler) { app in
+            ContractTestApp.override(app, Partial<any Application.Dependencies>([
+                \.checkExpiredSubscriptionsJob: sut.job,
+            ]))
             let tester = try app.testing()
             let path = "api/v1/subscriptions/jobs/check-expired"
 
@@ -383,13 +382,12 @@ struct SubscriptionExpirationTests {
             try await tester.test(.POST, path + "?reconcileDays=0", headers: headers, afterResponse: { res async in
                 #expect(res.status == .unprocessableEntity)
             })
+            try await tester.test(.POST, path + "?reconcileDays=366", headers: headers, afterResponse: { res async in
+                #expect(res.status == .unprocessableEntity)
+            })
             try await tester.test(.POST, path + "?reconcileDays=30", headers: headers, afterResponse: { res async in
                 #expect(res.status == .ok)
             })
-        } catch {
-            try await app.asyncShutdown()
-            throw error
         }
-        try await app.asyncShutdown()
     }
 }

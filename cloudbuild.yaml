@@ -6,7 +6,12 @@
 #     --substitutions=_TAG=manual-$(git rev-parse --short HEAD)
 #
 # Required substitutions are set on the trigger (defaults below suit show-menu-dev).
-# Secrets LIQPAY_PUBLIC_KEY / LIQPAY_PRIVATE_KEY live in Secret Manager.
+# Secrets LIQPAY_PUBLIC_KEY / LIQPAY_PRIVATE_KEY live in Secret Manager (mounted on Cloud Run).
+# Secret `github-contracts-token` (Secret Manager, project $PROJECT_ID) is a fine-grained,
+# read-only PAT (Contents: read) for rozd/show-menu-contracts, needed to resolve the private
+# ShowMenuContracts SwiftPM package. The Cloud Build service account needs
+# roles/secretmanager.secretAccessor on it. It is passed to `docker build` as a BuildKit
+# secret and never lands in an image layer.
 #
 # The Cloud Run URL is deterministic (https://<service>-<projectNumber>.<region>.run.app),
 # so the OIDC audiences and callback URL are known before the first deploy and no
@@ -38,6 +43,7 @@ steps:
     entrypoint: 'bash'
     env:
       - DOCKER_BUILDKIT=1
+    secretEnv: ['GITHUB_CONTRACTS_TOKEN']
     args:
       - '-c'
       - |
@@ -46,6 +52,7 @@ steps:
           -t $${IMAGE}:$$(cat /workspace/.image-tag) \
           -t $${IMAGE}:latest \
           --cache-from $${IMAGE}:latest \
+          --secret id=github_token,env=GITHUB_CONTRACTS_TOKEN \
           .
 
   # Step 4: push.
@@ -92,6 +99,11 @@ steps:
           --max-instances=5 \
           --set-env-vars="$${ENV_VARS}" \
           --update-secrets=LIQPAY_PUBLIC_KEY=LIQPAY_PUBLIC_KEY:latest,LIQPAY_PRIVATE_KEY=LIQPAY_PRIVATE_KEY:latest
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/github-contracts-token/versions/latest
+      env: GITHUB_CONTRACTS_TOKEN
 
 substitutions:
   _TAG: latest

@@ -1,4 +1,6 @@
 import Foundation
+import OpenAPIRuntime
+import ShowMenuContracts
 import Testing
 import Logging
 import FirestoreAPI
@@ -205,6 +207,65 @@ struct PurchaseSubscriptionTests {
     }
 
     private var owner: StubPrincipal { StubPrincipal(id: creator) }
+
+    // MARK: Controller (wire)
+
+    @Test("controller: purchaseSubscription answers the invoice id as plain text")
+    func controllerAnswersPlainText() async throws {
+        let sut = try await makeSUT()
+        await sut.users.seed(UserModel(id: creator, email: "max@example.com", name: "Max"))
+        let logger = Logger(label: "test", factory: { _ in CapturingLogHandler() })
+        let controller = PurchaseController(
+            purchaseFlow: sut.flow,
+            cancelPurchaseCommandHandler: CancelPurchaseCommandHandler(
+                unitOfWork: sut.uow, useCaseFactory: { _ in fatalError("unused") }, logger: logger
+            )
+        )
+        let input = Operations.PurchaseSubscription.Input(
+            path: .init(accountId: accountId),
+            body: .json(.init(
+                planId: sut.planId,
+                price: .init(
+                    price: .init(currencyName: "USD", currencySymbol: "$", currencyBase: 100, amount: 100),
+                    duration: .monthly
+                )
+            ))
+        )
+
+        let output = try await RequestContext.$principal.withValue(owner) {
+            try await controller.purchase(input)
+        }
+
+        guard case let .ok(ok) = output, case let .plainText(body) = ok.body else {
+            Issue.record("Expected 200 text/plain")
+            return
+        }
+        let text = try await String(collecting: body, upTo: 1024)
+        #expect(text.hasPrefix("invoice-"))
+        #expect(await sut.invoices.insertedModels.first?.id == text)
+    }
+
+    @Test("controller: a wire price that does not match the plan throws a domain error, not an output")
+    func controllerThrowsDomainErrors() async throws {
+        let sut = try await makeSUT()
+        let logger = Logger(label: "test", factory: { _ in CapturingLogHandler() })
+        let controller = PurchaseController(
+            purchaseFlow: sut.flow,
+            cancelPurchaseCommandHandler: CancelPurchaseCommandHandler(
+                unitOfWork: sut.uow, useCaseFactory: { _ in fatalError("unused") }, logger: logger
+            )
+        )
+        let input = Operations.PurchaseSubscription.Input(
+            path: .init(accountId: accountId),
+            body: .json(.init(
+                planId: "plan-does-not-exist",
+                price: .init(price: .init(currencyName: "USD", amount: 1), duration: .monthly)
+            ))
+        )
+        await #expect(throws: (any Error).self) {
+            _ = try await RequestContext.$principal.withValue(owner) { try await controller.purchase(input) }
+        }
+    }
 
     // MARK: Happy path
 

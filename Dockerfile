@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ================================
 # Build image
 # ================================
@@ -16,8 +17,23 @@ WORKDIR /build
 # This creates a cached layer that can be reused
 # as long as your Package.swift/Package.resolved
 # files do not change.
+#
+# ShowMenuContracts (the OpenAPI wire contract) is a PRIVATE GitHub repo. Its
+# read-only token is supplied as a BuildKit secret (`--secret id=github_token`)
+# and exposed ONLY to this one command, through per-process git config env vars:
+# it is never written to an image layer, Package.resolved or a persisted
+# git config. The later `swift build` needs no network: resolve has already
+# populated /build/.build (the host .build is excluded by .dockerignore, so
+# `COPY . .` cannot clobber it).
 COPY ./Package.* ./
-RUN swift package resolve \
+RUN --mount=type=secret,id=github_token,required=false \
+    if [ -s /run/secrets/github_token ]; then \
+        TOKEN="$(cat /run/secrets/github_token)"; \
+        export GIT_CONFIG_COUNT=1 \
+               GIT_CONFIG_KEY_0="url.https://x-access-token:${TOKEN}@github.com/.insteadOf" \
+               GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi; \
+    swift package resolve \
         $([ -f ./Package.resolved ] && echo "--force-resolved-versions" || true)
 
 # Copy entire repo into container

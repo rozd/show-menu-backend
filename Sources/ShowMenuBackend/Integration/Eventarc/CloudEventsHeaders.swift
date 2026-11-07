@@ -44,12 +44,17 @@ struct CloudEventsHeaders: Sendable {
 // MARK: - Parsing
 
 extension CloudEventsHeaders {
-    /// Creates CloudEventsHeaders from HTTP request headers
-    /// - Parameter request: The incoming HTTP request
+    /// Creates CloudEventsHeaders from the raw `ce-*` header values.
     /// - Throws: CloudEventsError if required headers are missing or invalid
-    static func from(_ request: Request) throws -> CloudEventsHeaders {
-        // Extract required headers
-        guard let specVersion = request.headers.first(name: "ce-specversion") else {
+    static func from(
+        specVersion: String?,
+        type: String?,
+        source: String?,
+        id: String?,
+        time: String?,
+        subject: String?
+    ) throws -> CloudEventsHeaders {
+        guard let specVersion else {
             throw CloudEventsError.missingHeader("ce-specversion")
         }
 
@@ -57,47 +62,33 @@ extension CloudEventsHeaders {
             throw CloudEventsError.invalidSpecVersion(specVersion)
         }
 
-        guard let type = request.headers.first(name: "ce-type") else {
+        guard let type else {
             throw CloudEventsError.missingHeader("ce-type")
         }
 
-        guard let source = request.headers.first(name: "ce-source") else {
+        guard let source else {
             throw CloudEventsError.missingHeader("ce-source")
         }
 
-        guard let id = request.headers.first(name: "ce-id") else {
+        guard let id else {
             throw CloudEventsError.missingHeader("ce-id")
         }
 
-        guard let timeString = request.headers.first(name: "ce-time") else {
+        guard let timeString = time else {
             throw CloudEventsError.missingHeader("ce-time")
         }
 
         // Parse RFC3339 timestamp (with or without fractional seconds)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        // Try with fractional seconds first, then without
-        let time: Date
-        if let parsed = formatter.date(from: timeString) {
-            time = parsed
-        } else {
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let parsed = formatter.date(from: timeString) else {
-                throw CloudEventsError.invalidTimeFormat(timeString)
-            }
-            time = parsed
+        guard let parsedTime = Date.parseISO(timeString) else {
+            throw CloudEventsError.invalidTimeFormat(timeString)
         }
-
-        // Optional subject header
-        let subject = request.headers.first(name: "ce-subject")
 
         return CloudEventsHeaders(
             specVersion: specVersion,
             type: type,
             source: source,
             id: id,
-            time: time,
+            time: parsedTime,
             subject: subject
         )
     }

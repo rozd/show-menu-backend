@@ -1,6 +1,9 @@
+import Logging
+import OpenAPIRuntime
+import ShowMenuContracts
 import Vapor
 
-/// `POST /api/v1/payments/liqpay/callback`: public, signature-verified. Answers 200 `OK`.
+/// `handleLiqPayCallback`: public, signature-verified. Answers 200 `text/plain` `OK`.
 ///
 /// * `data` missing or empty -> 400; `signature` missing or empty -> 401.
 /// * Bad signature -> 401, malformed payload (bad base64 / JSON, no `order_id`) -> 400, from
@@ -11,13 +14,12 @@ struct PaymentCallbackController: Sendable {
 
     let gateway: any PaymentGateway
     let handler: HandleLiqPayCallbackCommandHandler
+    let logger: Logger
 
-    @Sendable
-    func liqpayCallback(req: Request) async throws -> String {
-        let envelope: LiqPayCallbackEnvelope
-        do {
-            envelope = try req.content.decode(LiqPayCallbackEnvelope.self)
-        } catch {
+    func liqpayCallback(
+        _ input: Operations.HandleLiqPayCallback.Input
+    ) async throws -> Operations.HandleLiqPayCallback.Output {
+        guard case let .urlEncodedForm(envelope) = input.body else {
             throw Abort(.badRequest, reason: "Invalid callback body")
         }
         guard let data = envelope.data, !data.isEmpty else {
@@ -30,11 +32,11 @@ struct PaymentCallbackController: Sendable {
         // Verifies the signature (always) and decodes; throws `PaymentGatewayError`.
         let status = try gateway.decodeCallback(data: data, signature: signature)
         guard let payload = HandleLiqPayCallbackCommand.Payload(status: status) else {
-            req.logger.warning("LiqPay callback without order_id rejected")
+            logger.warning("LiqPay callback without order_id rejected")
             throw Abort(.badRequest, reason: "Missing order_id")
         }
 
-        req.logger.info("LiqPay callback received", metadata: [
+        logger.info("LiqPay callback received", metadata: [
             "orderId": .string(payload.orderId), "status": .string(payload.status)
         ])
 
@@ -42,10 +44,10 @@ struct PaymentCallbackController: Sendable {
         let eventId = LiqPayCallbackEventId.derive(
             orderId: payload.orderId, status: payload.status, paymentId: payload.paymentId
         )
-        let command = HandleLiqPayCallbackCommand(payload: payload, metadata: CommandMetadata(req: req))
+        let command = HandleLiqPayCallbackCommand(payload: payload, metadata: CommandMetadata())
         try await RequestContext.$integrationEventId.withValue(eventId) {
             try await handler.handle(command)
         }
-        return "OK"
+        return .ok(.init(body: .plainText(HTTPBody("OK"))))
     }
 }

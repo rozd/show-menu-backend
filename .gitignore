@@ -16,3 +16,5 @@ default.profraw
 *.log
 
 .claude/scheduled_tasks.lock
+
+.local/

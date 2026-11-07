@@ -2,13 +2,14 @@
 #
 #   make emulators   # terminal 1: auth 9099, firestore 9002, functions 9001 (forwarders only)
 #   make run-local   # terminal 2: Vapor on :8080 against the emulators
+#   make dev         # or: emulators + backend together in one terminal (scripts/dev-local.sh)
 #   make harness     # terminal 3: black-box parity suite (HARNESS_ARGS=smoke for one file)
 
 FIREBASE_DIR ?= ../show-menu-firebase
 FIREBASE_PROJECT ?= show-menu-dev
 HARNESS_ARGS ?=
 
-.PHONY: build test forwarders emulators run-local harness
+.PHONY: build test forwarders emulators run-local harness dev
 
 build:
 	swift build
@@ -31,3 +32,6 @@ run-local:
 
 harness:
 	npm --prefix $(FIREBASE_DIR)/test-harness run test:vapor:local $(if $(HARNESS_ARGS),-- $(HARNESS_ARGS),)
+
+dev:
+	./scripts/dev-local.sh

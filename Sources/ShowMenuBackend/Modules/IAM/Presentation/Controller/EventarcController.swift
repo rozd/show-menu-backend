@@ -1,53 +1,75 @@
+import Foundation
+import OpenAPIRuntime
+import ShowMenuContracts
 import Vapor
 
-/// Controller for handling Eventarc CloudEvents webhooks
-struct EventarcWebhookController: RouteCollection {
-    func boot(routes: any RoutesBuilder) throws {
-        // POST / - Main webhook endpoint for Eventarc events
-        routes.post(use: handleWebhook)
-    }
+/// Serves `handleEventarcEvent`: CloudEvents binary-mode deliveries forwarded from Firebase Auth
+/// and Firestore. Authentication (Google OIDC) has already happened in `ContractAccessMiddleware`.
+///
+/// Lives in IAM's Presentation layer because the user-lifecycle events are IAM's, but it also
+/// raises the Firestore `accounts/{id}` created event (consumed by Accounts and IAM): the
+/// controller only translates the CloudEvent into an integration event and publishes it.
+struct EventarcController: Sendable {
 
-    /// Handles incoming Eventarc webhook requests
-    /// - Parameter req: The incoming request
-    /// - Returns: HTTP 200 OK on success
-    @Sendable
-    func handleWebhook(req: Request) async throws -> HTTPStatus {
+    let app: Application
+
+    private var logger: Logger { app.logger }
+
+    /// `POST /api/v1/events/eventarc` → 200, empty body. No CloudEvents headers → 200, ignored.
+    func handleEventarcEvent(
+        _ input: Operations.HandleEventarcEvent.Input
+    ) async throws -> Operations.HandleEventarcEvent.Output {
+        let raw = CloudEventsParser.RawHeaders(
+            id: input.headers.ceId,
+            source: input.headers.ceSource,
+            type: input.headers.ceType,
+            specVersion: input.headers.ceSpecversion,
+            subject: input.headers.ceSubject,
+            time: input.headers.ceTime
+        )
+
         // Check if this is a CloudEvents request
-        guard CloudEventsParser.isCloudEventsRequest(req) else {
+        guard CloudEventsParser.isCloudEventsRequest(raw) else {
             // Not a CloudEvents request - this might be a health check or other traffic
-            req.logger.debug("Non-CloudEvents request to webhook endpoint")
-            return .ok
+            logger.debug("Non-CloudEvents request to webhook endpoint")
+            return .ok(.init())
         }
 
         // Parse and validate the CloudEvents headers; the body shape depends on the type.
-        let headers = try CloudEventsParser.parseHeaders(req)
+        let headers = try CloudEventsParser.parseHeaders(raw, logger: logger)
 
         // Route to appropriate handler based on event type
         switch headers.type {
         case CloudEventsHeaders.firebaseAuthUserCreated:
-            let authData = try req.content.decode(AuthEventData.self)
-            try await handleUserCreated(req: req, headers: headers, authData: authData)
+            try await handleUserCreated(headers: headers, authData: try decodeBody(input, as: AuthEventData.self))
         case CloudEventsHeaders.firebaseAuthUserDeleted:
-            let authData = try req.content.decode(AuthEventData.self)
-            try await handleUserDeleted(req: req, headers: headers, authData: authData)
+            try await handleUserDeleted(headers: headers, authData: try decodeBody(input, as: AuthEventData.self))
         case CloudEventsHeaders.firestoreDocumentCreated:
-            let documentData = try req.content.decode(FirestoreEventData.self)
-            try await handleDocumentCreated(req: req, headers: headers, documentData: documentData)
+            try await handleDocumentCreated(headers: headers, documentData: try decodeBody(input, as: FirestoreEventData.self))
         default:
             // Already validated in parser, but handle defensively
-            req.logger.warning("Unhandled event type", metadata: ["eventType": .string(headers.type)])
+            logger.warning("Unhandled event type", metadata: ["eventType": .string(headers.type)])
         }
 
-        return .ok
+        return .ok(.init())
+    }
+
+    /// Re-encodes the free-form JSON body and decodes the shape chosen by `ce-type`.
+    /// A missing or ill-typed body is a 400 (`DecodingError`).
+    private func decodeBody<T: Decodable>(
+        _ input: Operations.HandleEventarcEvent.Input,
+        as type: T.Type
+    ) throws -> T {
+        guard case let .json(payload)? = input.body else {
+            throw Abort(.badRequest, reason: "Missing event data")
+        }
+        let data = try JSONEncoder().encode(payload.additionalProperties)
+        return try JSONDecoder().decode(type, from: data)
     }
 
     /// Handles Firebase Auth user.v1.created events
-    private func handleUserCreated(
-        req: Request,
-        headers: CloudEventsHeaders,
-        authData: AuthEventData
-    ) async throws {
-        req.logger.info("User registered", metadata: [
+    private func handleUserCreated(headers: CloudEventsHeaders, authData: AuthEventData) async throws {
+        logger.info("User registered", metadata: [
             "userId": .string(authData.uid),
             "email": .string(authData.email ?? "(not provided)"),
             "displayName": .string(authData.displayName ?? "(not provided)"),
@@ -56,7 +78,7 @@ struct EventarcWebhookController: RouteCollection {
             "eventTime": .string(ISO8601DateFormatter().string(from: headers.time))
         ])
 
-        await req.deps.integrationEventChannel.publish(
+        await app.deps.integrationEventChannel.publish(
             UserCreatedIntegrationEvent(
                 // Stable across Eventarc redeliveries, so the inbox can dedup them.
                 id: headers.integrationEventId,
@@ -65,18 +87,14 @@ struct EventarcWebhookController: RouteCollection {
                 displayName: authData.displayName,
                 photoURL: authData.photoUrl,
                 registeredAt: headers.time,
-                correlationId: RequestContext.traceId ?? TraceID(stringLiteral: req.id)
+                correlationId: RequestContext.traceId ?? TraceID()
             )
         )
     }
 
     /// Handles Firebase Auth user.v1.deleted events
-    private func handleUserDeleted(
-        req: Request,
-        headers: CloudEventsHeaders,
-        authData: AuthEventData
-    ) async throws {
-        req.logger.info("User deleted", metadata: [
+    private func handleUserDeleted(headers: CloudEventsHeaders, authData: AuthEventData) async throws {
+        logger.info("User deleted", metadata: [
             "userId": .string(authData.uid),
             "email": .string(authData.email ?? "(not provided)"),
             "displayName": .string(authData.displayName ?? "(not provided)"),
@@ -84,27 +102,23 @@ struct EventarcWebhookController: RouteCollection {
             "eventTime": .string(ISO8601DateFormatter().string(from: headers.time))
         ])
 
-        await req.application.deps.integrationEventChannel.publish(
+        await app.deps.integrationEventChannel.publish(
             UserDeletedIntegrationEvent(
                 // Stable across Eventarc redeliveries, so the inbox can dedup them.
                 id: headers.integrationEventId,
                 userId: authData.uid,
                 email: authData.email,
                 displayName: authData.displayName,
-                correlationId: RequestContext.traceId ?? TraceID(stringLiteral: req.id)
+                correlationId: RequestContext.traceId ?? TraceID()
             )
         )
     }
 
     /// Handles Firestore `document.v1.created` events (today: `accounts/{accountId}`).
-    private func handleDocumentCreated(
-        req: Request,
-        headers: CloudEventsHeaders,
-        documentData: FirestoreEventData
-    ) async throws {
+    private func handleDocumentCreated(headers: CloudEventsHeaders, documentData: FirestoreEventData) async throws {
         let segments = documentData.path.split(separator: "/")
         guard segments.count == 2, segments[0] == "accounts" else {
-            req.logger.warning("Ignoring Firestore event for an unhandled document path", metadata: [
+            logger.warning("Ignoring Firestore event for an unhandled document path", metadata: [
                 "path": .string(documentData.path),
                 "eventId": .string(headers.id)
             ])
@@ -116,14 +130,14 @@ struct EventarcWebhookController: RouteCollection {
             throw Abort(.badRequest, reason: "accounts/\(documentData.documentId) event has no `creator`")
         }
 
-        req.logger.info("Account created", metadata: [
+        logger.info("Account created", metadata: [
             "accountId": .string(documentData.documentId),
             "creator": .string(creator),
             "eventId": .string(headers.id),
             "eventTime": .string(ISO8601DateFormatter().string(from: headers.time))
         ])
 
-        await req.deps.integrationEventChannel.publish(
+        await app.deps.integrationEventChannel.publish(
             AccountCreatedIntegrationEvent(
                 // Stable across redeliveries, so the inboxed handlers dedup them.
                 id: headers.integrationEventId,
@@ -131,7 +145,7 @@ struct EventarcWebhookController: RouteCollection {
                 creatorId: creator,
                 name: documentData.data?.name,
                 createdAt: headers.time,
-                correlationId: RequestContext.traceId ?? TraceID(stringLiteral: req.id)
+                correlationId: RequestContext.traceId ?? TraceID()
             )
         )
     }

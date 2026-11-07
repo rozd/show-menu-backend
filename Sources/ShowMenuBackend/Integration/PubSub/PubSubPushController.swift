@@ -8,8 +8,12 @@ import Vapor
 /// Receives push messages from Pub/Sub and dispatches them as integration events.
 ///
 /// Replaces the pull-based `PubSubIntegrationEventSubscriber` with Cloud Run's
-/// native request-driven model — Pub/Sub POSTs to `POST /internal/events`,
-/// the controller decodes and dispatches, then returns 200.
+/// native request-driven model — Pub/Sub POSTs a push envelope, the controller
+/// decodes and dispatches, then returns 200.
+///
+/// **Not wired to any route.** The push endpoint is not an operation in the OpenAPI contract
+/// (`show-menu-contracts`), and every HTTP route in this backend must be one. Add the operation
+/// to the spec first, then forward it from a `ContractAPI` witness to `handle(_:)`.
 ///
 /// **Decode path** (reverse of `PubSubIntegrationEventChannel.publish`):
 /// ```
@@ -24,22 +28,6 @@ struct PubSubPushController: Sendable {
     let dispatcher: any IntegrationEventDispatcher
     let coder: any IntegrationEventCoder
     let logger: Logger
-
-    /// Vapor entry point — decodes request body into `PubSubPushEnvelope`.
-    @Sendable
-    func handlePush(req: Request) async throws -> HTTPStatus {
-        let envelope: PubSubPushEnvelope
-        do {
-            envelope = try req.content.decode(PubSubPushEnvelope.self)
-        } catch {
-            req.logger.error("Failed to decode Pub/Sub push envelope", metadata: [
-                "error": .string(String(describing: error)),
-            ])
-            return .ok
-        }
-
-        return await handle(envelope)
-    }
 
     /// Testable core — operates on `PubSubPushEnvelope` directly.
     func handle(_ envelope: PubSubPushEnvelope) async -> HTTPStatus {
@@ -98,15 +86,5 @@ struct PubSubPushController: Sendable {
     /// the generic `IntegrationEventDispatcher.dispatch<E>(_:)`.
     private func dispatchTyped<E: IntegrationEvent>(_ event: E) async {
         await dispatcher.dispatch(event)
-    }
-}
-
-// MARK: - Route Collection
-
-struct PubSubPushRouteV1: RouteCollection {
-    let controller: PubSubPushController
-
-    func boot(routes: any RoutesBuilder) throws {
-        routes.post("events", use: controller.handlePush)
     }
 }

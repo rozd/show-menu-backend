@@ -1,8 +1,8 @@
 import Vapor
 
-extension SchedulerAuthMiddleware {
+extension SchedulerAuthenticator {
 
-    /// Builds the middleware from the process environment.
+    /// Builds the authenticator from the process environment.
     ///
     /// - Emulator → verification bypassed.
     /// - `SCHEDULER_API_KEY` → enables the `X-Api-Key` path.
@@ -15,9 +15,9 @@ extension SchedulerAuthMiddleware {
         isEmulator: Bool,
         client: any Client,
         logger: Logger
-    ) -> SchedulerAuthMiddleware {
+    ) -> SchedulerAuthenticator {
         if isEmulator {
-            return SchedulerAuthMiddleware(apiKey: nil, oidc: nil, bypassInEmulator: true)
+            return SchedulerAuthenticator(apiKey: nil, oidc: nil, bypassInEmulator: true, logger: logger)
         }
 
         let apiKey = environment["SCHEDULER_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }
@@ -40,31 +40,31 @@ extension SchedulerAuthMiddleware {
         if apiKey == nil && oidc == nil {
             logger.warning("SCHEDULER_OIDC_AUDIENCE / SCHEDULER_API_KEY not set — scheduled endpoints (subscription expiration job) will reject all callers")
         }
-        return SchedulerAuthMiddleware(apiKey: apiKey, oidc: oidc, bypassInEmulator: false)
+        return SchedulerAuthenticator(apiKey: apiKey, oidc: oidc, bypassInEmulator: false, logger: logger)
     }
 }
 
 extension Application {
 
-    private struct SchedulerAuthMiddlewareKey: StorageKey {
-        typealias Value = SchedulerAuthMiddleware
+    private struct SchedulerAuthenticatorKey: StorageKey {
+        typealias Value = SchedulerAuthenticator
     }
 
-    /// The scheduler auth middleware, built on first use. Tests may assign their own before
+    /// The scheduler authenticator, built on first use. Tests may assign their own before
     /// `routes(_:)` runs.
-    var schedulerAuthMiddleware: SchedulerAuthMiddleware {
+    var schedulerAuthenticator: SchedulerAuthenticator {
         get {
-            if let existing = storage[SchedulerAuthMiddlewareKey.self] {
+            if let existing = storage[SchedulerAuthenticatorKey.self] {
                 return existing
             }
-            let middleware = SchedulerAuthMiddleware.make(
+            let authenticator = SchedulerAuthenticator.make(
                 isEmulator: gcp.config.environment.isEmulator,
                 client: client,
                 logger: logger
             )
-            storage[SchedulerAuthMiddlewareKey.self] = middleware
-            return middleware
+            storage[SchedulerAuthenticatorKey.self] = authenticator
+            return authenticator
         }
-        set { storage[SchedulerAuthMiddlewareKey.self] = newValue }
+        set { storage[SchedulerAuthenticatorKey.self] = newValue }
     }
 }

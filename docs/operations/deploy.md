@@ -25,19 +25,36 @@ gcloud iam service-accounts create show-menu-scheduler --project=$P    # Cloud S
 for role in roles/datastore.user roles/secretmanager.secretAccessor roles/iam.serviceAccountTokenCreator; do
   gcloud projects add-iam-policy-binding $P --member=serviceAccount:show-menu-api@$P.iam.gserviceaccount.com --role=$role
 done
+# Fine-grained, read-only PAT (Contents: read) on rozd/show-menu-contracts, used by Cloud Build to
+# resolve the private ShowMenuContracts SwiftPM package (BuildKit secret; never in an image layer).
+printf '%s' "<github PAT>" | gcloud secrets create github-contracts-token --data-file=- --project=$P
 printf '%s' "<public key>"  | gcloud secrets create LIQPAY_PUBLIC_KEY  --data-file=- --project=$P
 printf '%s' "<private key>" | gcloud secrets create LIQPAY_PRIVATE_KEY --data-file=- --project=$P
 NUM=$(gcloud projects describe $P --format='value(projectNumber)')
 for role in roles/run.admin roles/iam.serviceAccountUser roles/artifactregistry.writer; do
   gcloud projects add-iam-policy-binding $P --member=serviceAccount:$NUM@cloudbuild.gserviceaccount.com --role=$role
 done
+# Let the build read the contracts token (secret-level grant, narrower than the project-level roles above)
+gcloud secrets add-iam-policy-binding github-contracts-token --project=$P \
+  --member=serviceAccount:$NUM@cloudbuild.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 ```
+`cloudbuild.yaml` exposes the secret to the build step as `GITHUB_CONTRACTS_TOKEN` (`availableSecrets`) and passes it to
+`docker build --secret id=github_token,env=GITHUB_CONTRACTS_TOKEN`. Rotate it with `gcloud secrets versions add github-contracts-token`;
+the build always reads `latest`. GitHub Actions uses a separate repo secret, `SHOWMENU_WORKSPACE_TOKEN`.
+If the build runs as a different service account than the default one above, grant that account `roles/secretmanager.secretAccessor` instead.
 Then connect the GitHub repo in Cloud Build and import the trigger from `.infra/triggers/production-deploy.yaml`.
 
 ### Forwarder functions, Scheduler
 Deploy `auth-forwarder`, `firestore-forwarder`, `identity-blocking` per `cloud-functions/README.md`, grant their
 service accounts `roles/run.invoker` on `show-menu-backend`, and list them in the trigger substitution
-`_EVENTARC_ALLOWED_SERVICE_ACCOUNTS`. Scheduler:
+`_EVENTARC_ALLOWED_SERVICE_ACCOUNTS`.
+
+**Webhook path.** The Eventarc webhook is `POST /api/v1/events/eventarc` (it was `POST /`). The forwarders'
+`BACKEND_WEBHOOK_URL` must be `https://show-menu-backend-$NUM.$R.run.app/api/v1/events/eventarc`; deploy the forwarders
+together with the backend release that moves the route, or events are rejected in between. The OIDC **audience does not
+change**: the backend verifies the token against `EVENTARC_OIDC_AUDIENCE` (fallback `SCHEDULER_OIDC_AUDIENCE`), which
+`cloudbuild.yaml` sets to the bare service URL, so the forwarders keep requesting tokens with the service URL as audience
+(not the full webhook path). The forwarder code lives in `show-menu-firebase`; its URL/audience handling was not re-verified here. Scheduler:
 ```bash
 URL=https://show-menu-backend-$NUM.$R.run.app
 gcloud scheduler jobs create http check-expired-subscriptions --project=$P --location=$R --schedule="0 0 * * *" --time-zone=UTC \
@@ -54,6 +71,8 @@ gcloud scheduler jobs create http check-expired-subscriptions --project=$P --loc
 | `BUILD_BRANCH_NAME`, `BUILD_SHORT_SHA` | Cloud Build built-ins |
 
 An audience that differs from the URL callers use fails with a silent 401.
+
+Health check: `curl https://show-menu-backend-$NUM.$R.run.app/api/v1/health` returns `{"status":"ok"}` (public; the old `/health` is gone).
 
 ## Cutover state (S17, 2026-11-06)
 No Node code is deployed on `show-menu-dev`: `firebase functions:list` shows only the forwarders (`onUserCreated`, `onUserDeleted`, `onAccountCreated`) and `identity-beforeCreated` / `identity-beforeSignedIn`, which the Vapor backend needs, and `firebase ext:list` shows no extension. The double-fire caveat no longer applies. Always pass `--project show-menu-dev`: the default gcloud config on the dev machine may point at another project.
