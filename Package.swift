@@ -31,6 +31,12 @@ let package = Package(
         // locally it resolves with the developer's git credentials; CI and Docker
         // resolve it with a read-only token (see docs/conventions/WireContract.md).
         .package(url: "https://github.com/rozd/show-menu-contracts.git", from: "0.6.0"),
+        // 💳 LiqPay client (signing, status, webhook decoding). Manifest is swift-tools 6.3.
+        //    Pinned to a revision; bump deliberately.
+        .package(url: "https://github.com/summerhammer/liqpay-client.git", revision: "fcfdf522d121b5c12783a2745803ce9cecc82ddd"),
+        // 🌐 HTTP client for the LiqPay checkout transport (a dedicated client with redirects disabled).
+        //    Comes with Vapor; declared explicitly so the import is not transitive.
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.20.0"),
         // 🔌 Vapor transport for swift-openapi (registers the generated routes).
         .package(url: "https://github.com/swift-server/swift-openapi-vapor.git", from: "1.1.0"),
         // Runtime types shared by the generated code (HTTPBody, ServerMiddleware, ...).
@@ -51,6 +57,9 @@ let package = Package(
                 .product(name: "Passage", package: "passage"),
                 .product(name: "PassageFluent", package: "passage-fluent"),
                 .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
+                .product(name: "LiqPayClient", package: "liqpay-client"),
+                .product(name: "LiqPayClientVapor", package: "liqpay-client"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "OpenAPIVapor", package: "swift-openapi-vapor"),
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
@@ -79,6 +88,7 @@ let package = Package(
             dependencies: [
                 .target(name: "ShowMenuBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
+                .product(name: "LiqPayClient", package: "liqpay-client"),
                 .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],

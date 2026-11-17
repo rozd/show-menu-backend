@@ -1,5 +1,5 @@
 {
-  "originHash" : "9eb51711ce88a051456e64ac74f3cc0ca0eb537d416ea5ff9aadb8885f21ddf3",
+  "originHash" : "688f89e42623288b8d43a9cd2fdf8c10e29c8003656a36068e0f5e9165222e91",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -98,6 +98,14 @@
       "state" : {
         "revision" : "64cc0a5c8dcf4fbd03be73b944f6850c0b82e439",
         "version" : "1.14.3"
+      }
+    },
+    {
+      "identity" : "liqpay-client",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/summerhammer/liqpay-client.git",
+      "state" : {
+        "revision" : "fcfdf522d121b5c12783a2745803ce9cecc82ddd"
       }
     },
     {
