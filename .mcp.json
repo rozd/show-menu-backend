@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "ux-patterns": {
+      "type": "http",
+      "url": "https://mcp.uxpatterns.dev"
+    },
+    "spec": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "d=\"$SPEC_DIR\"; if [ -z \"$d\" ]; then c=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && d=$(dirname \"$c\")/../show-menu-spec || d=$PWD/../show-menu-spec; fi; if [ ! -f \"$d/scripts/spec_mcp_server.py\" ]; then printf 'Spec MCP unavailable at %s; set SPEC_DIR to the spec checkout.\\n' \"$d\" >&2; exit 1; fi; exec python3 \"$d/scripts/spec_mcp_server.py\""
+      ]
+    },
+    "linear-sh": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    },
+    "sosumi": {
+      "type": "http",
+      "url": "https://sosumi.ai/mcp"
+    }
+  }
+}
