@@ -12,10 +12,17 @@ catches up.
 
 **Hard rule: no hand-written routes.** Nothing is exposed over HTTP unless it is an operation in
 the spec. No `RouteCollection`, no `app.get(...)`, no inline closures. `routes.swift` calls
-`registerContractHandlers()` and nothing else. A path that is not in the spec is a plain 404.
+`try app.registerContractHandlers()` and nothing else. A path that is not in the spec is a plain 404.
+
+**The one library-owned exception** is Passage's own routes: `/auth/*` (register, login, logout,
+refresh, ...) and `/me`. They are mounted by `Passage.configure` (`App/Passage+Vapor.swift`), not
+written by us, and they are required by the 2026-11-13 spec ruling that makes Passage the authentication provider
+(point 6, in `show-menu-spec`). They are not part of the contract and not served under `/api`. Nothing else outside the
+contract is allowed; a test asserts the route inventory.
 
 All contract paths are `/v1/...` in the spec and are served under `/api` (the transport group), so
-the wire path is `/api/v1/...`.
+the wire path is `/api/v1/...`. (The contract's `getCurrentOwner` is `/api/v1/me`; Passage's own
+`/me` is a different, library-owned route.)
 
 ## Changing the contract (order matters)
 
@@ -28,6 +35,12 @@ the wire path is `/api/v1/...`.
 4. The build now fails with *`ContractAPI` does not conform: missing `<operationID>`*. Add the
    witness (below), the controller method, the wire mapping, and the access-table entry.
 
+   Operations that are in the contract but not implemented yet are stubbed in
+   `App/ContractAPI+NotImplemented.swift` (grouped by contract tag), so a bump compiles: each
+   throws `NotImplementedError` and answers **501 `not_implemented`**. A new operation appearing
+   in a bump is added there first; implementing it means moving it out into its module's witness
+   file and adding it to the access table.
+
 Until the tag exists, `Package.swift` may carry a temporary `.package(path: "../show-menu-contracts")`
 for local iteration; never merge that.
 
@@ -38,6 +51,7 @@ openapi.yaml            (show-menu-contracts, source of truth)
   └─ swift-openapi-generator  →  APIProtocol, Components.Schemas.*, Operations.*, registerHandlers
        └─ ContractAPI : APIProtocol                    App/ContractAPI.swift
             ├─ extension ContractAPI { getHealth, getVersion }   App/ContractAPI+Health.swift
+            ├─ extension ContractAPI { <everything else> → 501 } App/ContractAPI+NotImplemented.swift
             └─ extension ContractAPI { … }             Modules/<Module>/Presentation/ContractAPI+<Module>.swift
                  └─ <Entity>Controller                 Modules/<Module>/Presentation/Controller/
                       └─ <Module>WireMapper            Modules/<Module>/Presentation/<Module>WireMapper.swift
@@ -59,11 +73,11 @@ requirement cannot be added from an extension, but a **witness** can).
 
   ```swift
   extension ContractAPI {
-      func getPlan(_ input: Operations.GetPlan.Input) async throws -> Operations.GetPlan.Output {
-          try await PlanController(
-              getPlanQueryHandler: app.deps.getPlanQueryHandler,
+      func getCurrentOwner(_ input: Operations.GetCurrentOwner.Input) async throws -> Operations.GetCurrentOwner.Output {
+          try await OwnerController(
+              getOwnerQueryHandler: app.deps.getOwnerQueryHandler,
               /* …only the handlers this controller needs… */
-          ).getPlan(input)
+          ).getCurrentOwner(input)
       }
   }
   ```
@@ -71,10 +85,10 @@ requirement cannot be added from an extension, but a **witness** can).
 - The controller is a plain `struct`, **not** an `APIProtocol` conformer, and takes **no Vapor
   `Request`**: input is the generated `Operations.X.Input`, output the generated `Operations.X.Output`.
   A unit test constructs it with stub handlers and no `Application`
-  (see `Tests/ShowMenuBackendTests/Unit/Modules/Catalog/PlanControllerTests.swift`).
+  (once a module has controllers).
 - `getHealth` / `getVersion` (no module behind them) are witnessed from `App/ContractAPI+Health.swift`.
-  Health touches no store on purpose: reaching Firestore in a liveness handler would turn it into a
-  readiness check.
+  Health touches no store on purpose: reaching the database in a liveness handler would turn it into a
+  readiness check. `getVersion` answers `BuildInfo.current` (`App/BuildInfo.swift`).
 
 ## Where generated types are allowed
 
@@ -84,8 +98,7 @@ requirement cannot be added from an extension, but a **witness** can).
 - `App/ContractAPI*.swift`,
 - `Integration/Vapor/ContractAccessMiddleware.swift` (needs the `Operations.X.id` constants).
 
-The Application layer keeps its own DTOs; the controller maps DTO ↔ wire (`CatalogWireMapper`,
-`IAMWireMapper`, `PurchasesWireMapper`). Letting generated types leak down would put domain and
+The Application layer keeps its own DTOs; the controller maps DTO ↔ wire (`<Module>WireMapper`). Letting generated types leak down would put domain and
 application code on the contract's release cadence.
 
 Finding generated code (Types/Server files are produced by the build plugin):
@@ -99,7 +112,7 @@ Xcode asks once to **trust the OpenAPIGenerator plugin** when opening the packag
 ## Errors
 
 Controllers **throw**; they do not return typed per-operation error cases. Every error becomes the
-D4 envelope centrally in `HTTPErrorMapping.map` (`Integration/Vapor/HTTPErrorMiddleware.swift`; see
+contract's `ErrorEnvelope` centrally in `HTTPErrorMapping.map` (`Integration/Vapor/HTTPErrorMiddleware.swift`; see
 [HTTPErrors.md](HTTPErrors.md)). The generated server wraps every handler, middleware and decoding
 failure in `ServerError`; the mapper **unwraps `underlyingError`** and maps that, and for a
 runtime-originated 4xx (missing body, bad parameter, unsupported content type) it maps by the
@@ -115,40 +128,59 @@ A wrong request `Content-Type` is a runtime **415**.
 One middleware, one table: `Integration/Vapor/ContractAccessMiddleware.swift`. It maps each
 `operationID` (keyed on the generated `Operations.X.id`, so a rename is a compile error) to an `Access`:
 
-| Access | Operations | Check |
+| Access | Meaning | Failure |
 |---|---|---|
-| `public` | `getHealth`, `getVersion`, `handleLiqPayCallback` | none (the callback's signature is its authentication) |
-| `admin` | the 10 Catalog operations | Firebase ID token with `admin` claim (401 / 403) |
-| `authenticated` | `purchaseSubscription`, `cancelPurchase`, `cancelSubscription`, `findUsers`, `getUser` | valid Firebase ID token |
-| `scheduler` | `checkExpiredSubscriptions` | `SchedulerAuthenticator`: Google OIDC or `X-Api-Key` |
-| `eventarc` | `handleEventarcEvent` | `EventarcAuthenticator`: Google OIDC |
+| `public` | no credentials needed | none |
+| `authenticated` | a valid Passage access token for an account IAM knows | 401 `unauthorized` |
+| `admin` | `authenticated` and the IAM `admin` role (`Role.admin`) | 401, or 403 `forbidden` ("Admin role required") |
+
+The production table lists **only** `getHealth` and `getVersion` (`public`). Every other operation
+is deliberately absent until it is implemented, so it fails closed (401) and its 501 stub is
+unreachable. Operations are added to the table in the same change that implements them.
+
+### How the Passage principal reaches the table
+
+`swift-openapi-vapor`'s `ServerMiddleware` only sees `HTTPTypes.HTTPRequest`, never the Vapor
+`Request` Passage authenticates on. So authentication is split across the two layers, in this order,
+on the `/api` route group built in `Application.registerContractHandlers(accessTable:)`:
+
+1. `OptionalPassageBearerAuthenticator` (Vapor middleware): if an `Authorization: Bearer` header is
+   present, runs Passage's `PassageBearerAuthenticator` and **swallows its failure**. Passage's own
+   authenticator throws on a malformed, expired or wrongly signed token and on an unknown account
+   (it is meant to sit behind `PassageGuard`); here an invalid credential just means
+   "unauthenticated", so a public operation keeps working with a stale token.
+2. `ContractPrincipalMiddleware` (Vapor middleware): if Passage populated `request.passage.user`,
+   resolves the principal through `PassagePrincipalResolver` (IAM `GetUserQuery` -> `PassagePrincipal`
+   with roles, one point read per request, so a role revocation is immediate) and runs the rest of the
+   request inside `RequestContext.$principal.withValue(_:)`. It **never rejects**; no user, unknown
+   user or invalid token all continue with no principal. Do not add `PassageGuard`.
+3. `ContractAccessMiddleware` (OpenAPI middleware): reads `RequestContext.principal` and applies the
+   table. The task-local carries across because the generated handler runs inside the Vapor route
+   closure.
 
 Invariants:
 
 - **Fail closed.** An operation missing from the table throws `AuthorizationError.missingPrincipal`
-  (401). A contract bump that forgets the table is never silently public. Add the table entry in the
-  same change as the witness.
-- **Authenticate before `next`, and never call `next` inside a `do/catch`.** Authentication finishes
-  first; the handler's own errors propagate unchanged. (Commit b249fdc: a scheduler job's Firestore
-  error had been turned into a 401 by wrapping `next` in the OIDC `catch`.)
-- Authenticated operations run `next` inside `RequestContext.$principal.withValue(_:)`. Use-case PEPs
-  still fail closed on an unset principal, so they remain the backstop.
+  (401). A contract bump that forgets the table is never silently public.
+- **Never call `next` inside a `do/catch`.** Access is decided first; the handler's own errors
+  propagate unchanged and are never turned into a 401.
+- Use-case PEPs still fail closed on an unset principal, so they remain the backstop.
 
 ## Middleware order
 
-Registered in `Application.registerContractHandlers()`, outermost first:
+Inside the contract, registered in `Application.registerContractHandlers(accessTable:)`, outermost first:
 
-1. `IgnoreAcceptHeaderMiddleware` — drops `Accept`. The generated serializer checks `Accept` against
-   the documented response type **after the handler ran**, answering 406 after side effects (a
-   purchase committed, its invoice id lost). Every operation has one response content type per
-   status, so there is nothing to negotiate.
-2. `EmptyRequestBodyMiddleware` — a zero-length body is presented as "no body" (OpenAPIVapor hands an
-   empty `HTTPBody`, the generated code treats only `nil` as absent; matters for the optional-body
-   `handleEventarcEvent`).
-3. `ContractAccessMiddleware` — authentication / authorization per operation.
+1. `IgnoreAcceptHeaderMiddleware`: drops `Accept`. The generated serializer checks `Accept` against
+   the documented response type **after the handler ran**, answering 406 after side effects. Every
+   operation has one response content type per status, so there is nothing to negotiate.
+2. `EmptyRequestBodyMiddleware`: a zero-length body is presented as "no body" (OpenAPIVapor hands an
+   empty `HTTPBody`, the generated code treats only `nil` as absent; matters for optional bodies).
+3. `ContractAccessMiddleware`: per-operation access.
 
-Vapor-level middleware around the whole app (trace, `HTTPErrorMiddleware`, the global
-`IdempotencyKeyMiddleware`) is configured in `entrypoint.swift` / `configure.swift`.
+Vapor-level, around the whole app: `TraceMiddleware` (added first in `entrypoint.swift`), optional
+`CORSMiddleware` (only when `CORS_ALLOWED_ORIGINS` is set), `HTTPErrorMiddleware`
+(`app.useErrorEnvelope()`), the global `IdempotencyKeyMiddleware`; then, on the `/api` group only, the
+two Passage middlewares above.
 
 ## Serialization
 
@@ -159,8 +191,8 @@ nil are omitted (e.g. currency `symbol` / `base` / `digits`).
 ## Idempotency-Key
 
 Handled by the **global** `IdempotencyKeyMiddleware`, which binds `RequestContext.idempotencyKey`.
-The generated `idempotencyKey` header on an operation's `Input` is deliberately **ignored** by the
-controller (`PurchaseController`); do not read it there.
+The generated `idempotencyKey` header on an operation's `Input` is deliberately **ignored** by
+controllers; do not read it there. A malformed key is a 400 `idempotency_key_invalid` on any route.
 
 ## Private repository access (CI, Docker, local)
 
@@ -168,7 +200,7 @@ controller (`PurchaseController`); do not read it there.
 read-only PAT (Contents: read) on `rozd/show-menu-contracts`.
 
 - **Local:** a working `gh auth login` / git credential helper for github.com is enough.
-- **GitHub Actions** (`.github/workflows/ci.yml`): repo secret `SHOWMENU_WORKSPACE_TOKEN`, applied with a
+- **GitHub Actions** (`.github/workflows/ci.yml`, when present): repo secret `SHOWMENU_WORKSPACE_TOKEN`, applied with a
   global `git config url.….insteadOf` step before the build. Fork PRs do not receive secrets, so they
   cannot resolve the package.
 - **Docker / Cloud Build:** BuildKit secret `github_token` (Cloud Build: Secret Manager
