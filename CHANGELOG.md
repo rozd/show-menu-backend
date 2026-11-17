@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/rozd/show-menu-backend/compare/v0.2.0...v0.3.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* the Firestore/Firebase implementation is gone; it remains reachable at tag v0.2.0 (local tag firestore-final).
+
+### Features
+
+* **api:** serve getHealth and getVersion from show-menu-contracts 0.6.0 ([a7c99f4](https://github.com/rozd/show-menu-backend/commit/a7c99f41c101b7c610741d9ac1b433b37a847a86))
+* **billing:** port PaymentGateway and LiqPay adapters with Money ([34433f7](https://github.com/rozd/show-menu-backend/commit/34433f7a8a2ea7a586411ce355bff1e884e6d4d3))
+* restart from vapor-standalone-template (Postgres + Passage) ([b96060a](https://github.com/rozd/show-menu-backend/commit/b96060aa2e0a1f08f955c4daa0a2a12cd0a6ac47))
+
+
+### Bug Fixes
+
+* **config:** fail fast in production without a database or JWKS ([186343b](https://github.com/rozd/show-menu-backend/commit/186343bedbf368364ea4cb241cdd1bc1718af6ab))
+
 ## [0.2.0](https://github.com/rozd/show-menu-backend/compare/v0.1.0...v0.2.0) (2026-11-07)
 
 
