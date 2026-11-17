@@ -1,8 +1,10 @@
 # Show Menu Backend
 
-Swift/Vapor backend for Show Menu (code name): QR menus for customers, an admin dashboard for restaurant owners, and LiqPay subscription payments. Built with **Domain-Driven Design (DDD)** and **CQRS** over a SQL database. Persistence is one adapter — Fluent — with two drivers behind it: **SQLite** when nothing is configured, so the whole architecture (transactions, optimistic concurrency, a transactional outbox, idempotent commands, authorization) runs and is testable with **zero external services**, and **Postgres** when `DATABASE_URL` is set. Nothing above the `DataSource` seam changes between them.
+Swift/Vapor backend for Show Menu (code name): QR menus for customers, an admin dashboard for restaurant owners, and LiqPay subscription payments. Built with **Domain-Driven Design (DDD)** and **CQRS** over a SQL database. PostgreSQL is the system of record and **Passage** handles authentication (it replaces Firebase Auth). Persistence is one adapter — Fluent — with two drivers behind it: **Postgres** when `DATABASE_URL` is set, and an in-memory **SQLite** fallback when nothing is configured, so the whole architecture (transactions, optimistic concurrency, a transactional outbox, idempotent commands, authorization) runs and is testable with **zero external services**. Nothing above the `DataSource` seam changes between them.
 
-The HTTP API is generated from the OpenAPI contract in the private `show-menu-contracts` package; no routes are hand-written (see `docs/conventions/WireContract.md`). Passage mounts `/auth/*` and `/me` itself.
+The HTTP API is generated from the OpenAPI contract in the private `show-menu-contracts` package (0.6.0); no routes are hand-written (see `docs/conventions/WireContract.md`). Passage mounts `/auth/*` and `/me` itself — the one library-owned exception.
+
+This code is a restart from `vapor-standalone-template`; the previous implementation is at tag `v0.2.0` (`firestore-final`). See [docs/migration/restart-from-standalone-template.md](docs/migration/restart-from-standalone-template.md) for what was ported, dropped and still to be redesigned.
 
 ## Prerequisites
 
@@ -15,8 +17,10 @@ That's the whole list. The default path needs no database and no cloud account.
 ## Quick Start
 
 ```bash
+make build   # swift build
 make run     # swift run Run serve
 make test    # swift test
+make db-up   # optional: a local Postgres
 ```
 
 No environment variables, no configuration files, no services to start first.
@@ -109,6 +113,8 @@ Nothing is required. Everything below is optional:
 | `APP_ORIGIN` | No | Public origin for Passage auth links (default: `http://localhost:<port>`) |
 | `JWKS` | No | Inline JWKS JSON with the token-signing key; if unset, an ephemeral dev key is generated |
 | `JWKS_FILE_PATH` | No | Path to a JWKS file; used when `JWKS` is unset |
+| `CORS_ALLOWED_ORIGINS` | No | Comma-separated origins; unset installs no CORS middleware |
+| `LIQPAY_PUBLIC_KEY` / `LIQPAY_PRIVATE_KEY` | No | Both set → the live LiqPay gateway. Otherwise `.development`/`.testing` use the fake gateway and any other environment an unconfigured one that refuses every call |
 
 ## Architecture
 
@@ -119,9 +125,11 @@ Sources/ShowMenuBackend/
 ├── routes.swift              # Route registration (HTTP routes come from the OpenAPI contract)
 ├── App/                      # Application wiring (DI / CompositionRoot, outbox relay opt-in)
 ├── Lib/                      # Generic DDD + CQRS + cross-cutting infrastructure (store-agnostic)
-├── Integration/              # Adapters: Fluent SQL store, Vapor glue (ETag, idempotency header, outbox job)
+├── Integration/              # Adapters: Fluent SQL store, Passage, LiqPay, Vapor glue (access/error middleware, ETag, idempotency header, outbox job)
 └── Modules/                  # Business modules
-    └── IAM/                  # User account lifecycle + authorization
+    ├── IAM/                  # Users (shared with Passage) + authorization pattern
+    ├── Billing/              # PaymentGateway port (not exposed over HTTP yet)
+    └── Shared/               # Money, LocalizedString
 ```
 
 Each module in `Modules/` follows the DDD layering: **Domain** (Entity, Event, Error, Repository protocol, Specification) → **Application** (Command/Query, UseCase, DTO, Mapper, Authorization) → **Infrastructure** (store `Codable` Model, DataSource, Repository impl) → **Presentation** (controllers and contract witnesses, added with the contract).
@@ -160,7 +168,7 @@ docker compose up app
 
 That image runs anywhere that takes a container — a VM, Kubernetes, a managed container service, a Raspberry Pi.
 
-> **Before you deploy anything real:** set `DATABASE_URL`. On the default in-memory SQLite database every restart wipes the data and every additional replica sees a different dataset, so a rolling deploy or an autoscaler is enough to lose writes. See **Running on Postgres**.
+> **Before you deploy anything real:** set `DATABASE_URL` (and the Passage signing keys, `JWKS`; the Cloud Build wiring for both is still a TODO in `cloudbuild.yaml`). On the default in-memory SQLite database every restart wipes the data and every additional replica sees a different dataset, so a rolling deploy or an autoscaler is enough to lose writes. See **Running on Postgres**.
 
 One other thing worth doing before production:
 
@@ -168,6 +176,13 @@ One other thing worth doing before production:
 
 ## API Endpoints
 
-The HTTP API is defined by the OpenAPI contract in `show-menu-contracts` and served by generated routes (next commit). Passage mounts its own `/auth/*` and `/me` routes.
+The HTTP API is defined by the OpenAPI contract in `show-menu-contracts` and served by generated routes under `/api`. Implemented today:
+
+| Endpoint | Operation | Access |
+|---|---|---|
+| `GET /api/v1/health` | `getHealth` | public |
+| `GET /api/v1/version` | `getVersion` | public |
+
+Every other contract operation answers `501 not_implemented` until it is implemented (the backlog is in the migration doc). Passage mounts its own `/auth/*` and `/me` routes outside `/api`.
 
 Creating and deleting a user account emits `UserCreatedIntegrationEvent` / `UserDeletedIntegrationEvent`, which run follow-on work as a trusted `SystemPrincipal`.

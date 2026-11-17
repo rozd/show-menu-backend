@@ -1,11 +1,11 @@
 # Developer Notes
 
-Technical reference for developers working on this codebase. For setup and deployment, see [README.md](README.md).
+Technical reference for developers working on this codebase. For setup and deployment, see [README.md](README.md). For what was carried over from the v0.2.0 implementation and what is still to be redesigned, see [docs/migration/restart-from-standalone-template.md](docs/migration/restart-from-standalone-template.md).
 
 ## Request Flow
 
 ```
-Route → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Store
+Generated route (contract) → ContractAPI witness → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Store
 ```
 
 **Reads (Queries)** skip UnitOfWork — no transaction needed:
@@ -195,7 +195,7 @@ The SQL database is reached through one dependency, `appDatabase` on `Applicatio
 
 ## Adding a New Module
 
-1. **Create the module directory** under `Sources/{APP_NAME}/Modules/YourModule/`
+1. **Create the module directory** under `Sources/ShowMenuBackend/Modules/YourModule/`
 
 2. **Domain layer** — Entity (AggregateRoot), Event (DomainEvent + EventKind enum), Error, Repository protocol
 
@@ -203,9 +203,9 @@ The SQL database is reached through one dependency, `appDatabase` on `Applicatio
 
 4. **Application layer** — DTO, Mapper, DataSource protocol, Command + Handler, Query + Handler, UseCase
 
-5. **Presentation layer** — Controller, RouteCollection
+5. **Presentation layer** — Controller (plain type taking the generated `Operations.X.Input`, returning `Output`) and a `ContractAPI+{Module}.swift` witness. The operations are added to `show-menu-contracts` first (see [WireContract.md](docs/conventions/WireContract.md)); never write a `RouteCollection`
 
-6. **Vapor integration** — `{Module}+Vapor.swift` with `extension {Entity}DTO: Content {}`
+6. **Vapor integration** — `{Module}+Vapor.swift` where the module needs framework glue
 
 7. **Wire dependencies** — declare the properties on the `Application.Dependencies` protocol in `Vapor+Dependencies.swift`, then implement them in a new `Modules/YourModule/CompositionRoot+YourModule.swift` extension on `CompositionRoot`:
    ```swift
@@ -219,15 +219,7 @@ The SQL database is reached through one dependency, `appDatabase` on `Applicatio
    var createEntityCommandHandler: CreateEntityCommandHandler { get }
    ```
 
-8. **Register routes** in `routes.swift`:
-   ```swift
-   let entityController = EntityController(
-       getEntityQueryHandler: app.deps.getEntityQueryHandler,
-       listEntitiesQueryHandler: app.deps.listEntitiesQueryHandler,
-       createEntityCommandHandler: app.deps.createEntityCommandHandler
-   )
-   try app.register(collection: EntityRouteV1(controller: entityController))
-   ```
+8. **Expose the operations** — move them out of `App/ContractAPI+NotImplemented.swift` into the module's witness, and add each to `ContractAccessMiddleware.table` (public / authenticated / admin; an unlisted operation is a 401). Routes are never registered by hand.
 
 ## Testing
 
@@ -237,7 +229,7 @@ Tests use the **Swift Testing** framework (`@Suite`, `@Test`, `#expect`, `#requi
 
 ### Test Doubles
 
-Located in `Tests/{APP_NAME}Tests/Support/`. They are named `Spy*` / `Stub*` / `Recording*` so they never read as production types:
+Located in `Tests/ShowMenuBackendTests/Support/`. They are named `Spy*` / `Stub*` / `Recording*` so they never read as production types:
 
 | Double | Replaces | Key feature |
 |---|---|---|
@@ -257,7 +249,7 @@ Located in `Tests/{APP_NAME}Tests/Support/`. They are named `Spy*` / `Stub*` / `
 
 Tests that need genuine transactional behaviour (real transactions, real primary-key violations, `RETURNING`-based check-and-set) use a real in-memory SQLite database via the `withSQLiteDatabase` fixture instead of a double — the default driver needs no external service, so there is nothing to fake. Only `FluentPostgresIntegrationTests` needs a server, and it is skipped unless `POSTGRES_TEST_URL` is set.
 
-The Fluent adapter's unit tests assert the **SQL it emits** against `StubSQLDatabase`. The properties only a live database can prove — migrations apply, a real CAS race, an outbox row vanishing with a rolled-back transaction, the idempotency primary-key violation — live in `Tests/{APP_NAME}Tests/Integration/` and are skipped unless `POSTGRES_TEST_URL` is set:
+The Fluent adapter's unit tests assert the **SQL it emits** against `StubSQLDatabase`. The properties only a live database can prove — migrations apply, a real CAS race, an outbox row vanishing with a rolled-back transaction, the idempotency primary-key violation — live in `Tests/ShowMenuBackendTests/Integration/` and are skipped unless `POSTGRES_TEST_URL` is set:
 
 ```bash
 docker compose --profile postgres up -d db
@@ -325,7 +317,8 @@ struct UserOnboardUseCaseTests {
 
 - **Persistence first.** The *default* driver is in-memory SQLite: non-durable and single-instance. Nothing else on this list matters until you set `DATABASE_URL` — see [Persistence: SQLite, Postgres, and the seam](#persistence-sqlite-postgres-and-the-seam).
 - **Scaling.** On Postgres the app is stateless and scales horizontally; the only in-process state is the outbox relay's schedule (safe to run on several instances since delivery is at-least-once and consumers dedup) and the in-process integration-event channel (move to a real transport for multi-instance delivery).
-- **Authentication.** Passage is wired and mounts `/auth/*` and `/me` itself; contract-served routes are guarded per operation (wired with the contract). `PassagePrincipalMiddleware` binds the authenticated user to `RequestContext.principal`, resolving roles through IAM's `User` query handler on every request. Authorization checks (`Ability`/`Voter`) are enforced by use cases; PEPs fail closed if the principal is unset. To remove Passage: delete `configurePassage` call, the middleware group, and `Integration/Passage/` + `Modules/IAM/IAM+Passage.swift`.
+- **Authentication.** Passage is wired and mounts `/auth/*` and `/me` itself (the one library-owned exception to "no hand-written routes"); contract-served routes under `/api` are guarded per operation by `ContractAccessMiddleware`. `ContractPrincipalMiddleware` binds the authenticated user to `RequestContext.principal`, resolving roles through IAM's `User` query handler on every request, and never rejects. Authorization checks (`Ability`/`Voter`) are enforced by use cases; PEPs fail closed if the principal is unset. To remove Passage: delete `configurePassage` call, the middleware group, and `Integration/Passage/` + `Modules/IAM/IAM+Passage.swift`.
+- **Payments.** The LiqPay gateway is selected from `LIQPAY_PUBLIC_KEY`/`LIQPAY_PRIVATE_KEY` and `app.environment` (Live / Fake in dev and testing / Unconfigured otherwise); it is a dependency (`paymentGateway`) and is not exposed over HTTP yet.
 - **Secrets.** Read them from the environment at startup in `configure(_:)`; there is deliberately no secret store binding.
 - **Logging.** `LOG_LEVEL` selects the level at bootstrap. `TraceMiddleware` populates `RequestContext.traceId` — include it in structured log metadata so a request can be reconstructed.
 - **Concurrency.** Swift 6.3 toolchain; strict concurrency is enforced. All types are `Sendable`; entity classes use `@unchecked Sendable`.
