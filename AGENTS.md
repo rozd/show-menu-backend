@@ -4,21 +4,20 @@ Guidance for Claude Code / Codex / Gemini when working with code in this reposit
 
 ## Project Overview
 
-Swift/Vapor backend for Show Menu (code name: QR menus, admin dashboard, LiqPay subscription payments) using **Domain-Driven Design (DDD)** with **CQRS** (Command Query Responsibility Segregation) over a **SQL** persistence layer. Aggregate storage is always a SQL database — one adapter (`Integration/Fluent/`) with two drivers behind it: **SQLite** when nothing is configured, so the app runs with no external services, and **Postgres** when `DATABASE_URL` is set. Swift 6.3 toolchain, strict concurrency (`Sendable` throughout).
+Swift/Vapor backend for Show Menu (code name: QR menus, admin dashboard, LiqPay subscription payments) using **Domain-Driven Design (DDD)** with **CQRS** (Command Query Responsibility Segregation) over a **SQL** persistence layer, **contract-first**: the HTTP API is generated from the OpenAPI spec in `show-menu-contracts`. Aggregate storage is always a SQL database — one adapter (`Integration/Fluent/`) with two drivers behind it: **PostgreSQL** (the system of record, selected by `DATABASE_URL`) and an in-memory **SQLite** fallback so the app boots and is testable with no external services. Authentication is **Passage** (it replaces Firebase Auth). Swift 6.3 toolchain, strict concurrency (`Sendable` throughout).
 
-**The default driver is in-memory SQLite: non-durable and single-instance** — all data is lost on restart, and it does not work across multiple instances. It exists so the app boots and is testable with zero infrastructure. Production requires `DATABASE_URL` (a Postgres, hosting not yet decided); no code changes with it. Why SQL only, and where a future non-SQL store would attach: **Persistence** below.
+This code is a restart from `vapor-standalone-template` (the old Firestore/Firebase implementation lives at tag `v0.2.0` / `firestore-final`). What was ported, dropped and still to be redesigned is in `docs/migration/restart-from-standalone-template.md` — read it before assuming a v0.2.0 feature exists. Today the contract serves `getHealth` and `getVersion`; every other operation answers `501 not_implemented`. Modules: `IAM` (users, authorization pattern), `Billing` (the `PaymentGateway` port; not exposed over HTTP yet) and `Shared` (`Money`, `LocalizedString`).
+
+**The fallback driver is in-memory SQLite: non-durable and single-instance** — all data is lost on restart, and it does not work across multiple instances. Production requires `DATABASE_URL` (a Postgres, hosting not yet decided); no code changes with it. Why SQL only, and where a future non-SQL store would attach: **Persistence** below.
 
 ## Build & Run Commands
 
 ```bash
-# Build
-swift build
-
-# Run locally — no prerequisites, no environment configuration
-swift run Run
-
-# Run all tests
-swift test
+make build        # swift build
+make run          # swift run Run serve — no prerequisites, no environment configuration
+make test         # swift test
+make db-up        # local Postgres (docker compose --profile postgres up -d db); make db-down stops it
+make docker-build # docker compose build app
 
 # Run a single test suite
 swift test --filter UserOnboardUseCaseTests
@@ -26,14 +25,13 @@ swift test --filter UserOnboardUseCaseTests
 # Run a single test by name
 swift test --filter "onboard"
 
-# Docker build
+# Docker build (needs a read-only GitHub token for the private contracts package)
 docker build --secret id=github_token,env=GITHUB_CONTRACTS_TOKEN -t show-menu-backend .
-docker compose up app
 ```
 
 ### Environment Variables
 
-**None are required** — the app starts with no configuration. Optional: `PORT` (default 8080) and `LOG_LEVEL`.
+**None are required** — the app starts with no configuration. Optional: `PORT` (default 8080), `LOG_LEVEL`, `CORS_ALLOWED_ORIGINS` (comma-separated; unset installs no CORS middleware), `APP_ORIGIN` and `JWKS`/`JWKS_FILE_PATH` (Passage; an ephemeral dev key is generated if neither is set), and `LIQPAY_PUBLIC_KEY`/`LIQPAY_PRIVATE_KEY` (see **Billing and LiqPay**).
 
 `configure(_:)` calls `try await configureFluentStore(app)` (`App/Fluent+Vapor.swift`), which registers the app database under `DatabaseID.app` — the composition root resolves it as the `appDatabase` dependency. It picks the **driver** from the environment — the one persistence decision the environment does make, and only because both drivers are the same adapter: `DATABASE_URL` (or `DATABASE_HOST`/`_PORT`/`_USERNAME`/`_PASSWORD`/`_NAME`) → Postgres; nothing set → an in-memory SQLite database, announced as a warning. `DATABASE_AUTO_MIGRATE` (default `true`) applies pending migrations at boot. A local database: `docker compose --profile postgres up db`.
 
@@ -51,6 +49,14 @@ In front of the generated route, on the `/api` group: `TraceMiddleware` → `HTT
 
 **Reads (Queries)** skip UnitOfWork: `Controller → QueryHandler → DataSource → Store`
 **Writes (Commands)** go through UnitOfWork: `Controller → CommandHandler → UnitOfWork.execute { UseCase → Repository }` — domain events are collected during execution and dispatched after commit.
+
+### Wire Contract (OpenAPI)
+
+The HTTP API is **generated from the OpenAPI spec** in the private sibling package `show-menu-contracts` (SwiftPM, pinned **by tag**, product `ShowMenuContracts`; currently 0.6.0). **Hard rule: no hand-written routes** — anything exposed over HTTP is defined in the spec first (PR in `show-menu-contracts`), then the tag is bumped in `Package.swift`, then a witness is added. **The single library-owned exception** is Passage's own routes, `/auth/*` (register, login, logout, refresh, …) and `/me`, mounted by `Passage.configure` (ruling `2026-11-13-passage-replaces-firebase-auth`, point 6: the Dashboard uses Passage's JSON endpoints); they are outside `/api` and not part of the contract. Contract paths are `/v1/...` in the spec and served as `/api/v1/...` (the contract's `getCurrentOwner`, `/api/v1/me`, is not Passage's `/me`).
+
+One `ContractAPI: APIProtocol` (`App/ContractAPI.swift`) is satisfied by witness extensions that forward to plain controllers (generated `Operations.X.Input/Output`, no Vapor `Request`). Operations in the contract but not implemented yet are stubbed in `App/ContractAPI+NotImplemented.swift`, grouped by contract tag: each throws `NotImplementedError` and answers **501 `not_implemented`**; `getHealth`/`getVersion` are in `App/ContractAPI+Health.swift`. Implementing one means moving it into its module's `Modules/<Module>/Presentation/ContractAPI+<Module>.swift` and adding it to the access table. Errors are thrown and mapped centrally by `HTTPErrorMiddleware` (error envelope). Access is one operationID-keyed table in `ContractAccessMiddleware`: `public` / `authenticated` / `admin` (`scheduler` and `eventarc` were dropped), and it **fails closed** — an unlisted operation is a 401. The table reads `RequestContext.principal`, bound earlier by the never-rejecting `ContractPrincipalMiddleware`.
+
+Resolving the package needs a read-only GitHub token: CI secret `SHOWMENU_WORKSPACE_TOKEN`; Docker build secret `github_token`; Cloud Build secret `github-contracts-token`. Full rules: `docs/conventions/WireContract.md`.
 
 ### Dependency Injection
 
@@ -225,6 +231,10 @@ Guarantees and limits:
 
 Unwired building block. Composing the trio: retry outermost, limiter **innermost** so every retried attempt is paced — `policy.execute { try await breaker.execute { try await limiter.execute { … } } }`.
 
+### Billing and LiqPay
+
+`Modules/Billing/Domain/Gateway/` holds the provider-agnostic `PaymentGateway` port (`checkout` → hosted payment page URL, `status`, `decodeCallback`; provider-agnostic `PaymentStatus` and `PaymentGatewayError`). Amounts are `Money` (`Modules/Shared/Domain/Money.swift`: `Int64` minor units + ISO-4217 code, matching the contract); the LiqPay adapter converts to LiqPay's decimal string. `Integration/LiqPay/` holds the adapters: `LiqPayPaymentGateway` (signs the checkout envelope; `subscribe` with `month` periodicity or one-off `pay`), `LiqPayCheckoutTransport`, `FakePaymentGateway`, `UnconfiguredPaymentGateway` and `LiqPayGatewaySelection`, built on the `RetryPolicy` + `CircuitBreaker` composition from `Lib/AOP/Resilience`. **Selection** is keyed on `app.environment`: both `LIQPAY_PUBLIC_KEY` and `LIQPAY_PRIVATE_KEY` set → Live; otherwise `.development`/`.testing` → Fake (fixed sandbox test keypair); otherwise Unconfigured (every call throws `notConfigured`) plus a boot warning — never Fake in production. The gateway is a `paymentGateway` dependency (`Modules/Billing/CompositionRoot+Billing.swift`) and is **not exposed over HTTP**: the Payment/Billing Document model, checkouts, the LiqPay callback and the expiry job are the redesign backlog in `docs/migration/restart-from-standalone-template.md`. Never log the keys.
+
 ### Integration Layer (`Integration/`)
 
 Everything store- or framework-specific lives here. `Lib/` never imports from it.
@@ -251,6 +261,7 @@ Everything store- or framework-specific lives here. `Lib/` never imports from it
   - `IdempotencyKey+Request` — `IdempotencyKeyMiddleware`, lifting the `Idempotency-Key` header into `RequestContext`.
   - `OutboxRelayJob` — the `AsyncScheduledJob` that drains the transactional outbox; scheduled by `App/Outbox+Vapor.swift`.
   - `VaporQueueIntegrationEventChannel` — an `IntegrationEventChannel` over Vapor Queues (building block; not wired by default).
+- **LiqPay/** — the LiqPay adapters of the `PaymentGateway` port; see **Billing and LiqPay**.
 - **Standard/** — small Foundation extensions shared by the adapters.
 
 > `VaporQueueIntegrationEventChannel` and the **outbox relay** (`OutboxRelayJob` / `app.startOutboxRelay()`) ship as building blocks and are **not** wired into `CompositionRoot`/`configure` by default — add them when a module needs them. (The outbox *recording* side, `context.outbox`, is always wired; only the relay is opt-in, paired with the first use case that records integration events.)
