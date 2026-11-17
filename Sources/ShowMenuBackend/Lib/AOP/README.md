@@ -20,12 +20,12 @@ Principal-aware authorization primitives — the `*Ability` / `*Voter` conventio
 
 ### Idempotency
 
-Inbound command de-duplication keyed on the client's `Idempotency-Key` header — a retry replays the first response instead of re-running the work. Implemented as a `CommandHandler`-refining protocol (conform to opt in) whose reserve/replay/store run **inside the command's own transaction**, so the de-duplication record and the command's writes commit atomically. The concrete store binding lives in `Integration/Firestore/`; the edge extraction in `Integration/Vapor/`.
+Inbound command de-duplication keyed on the client's `Idempotency-Key` header — a retry replays the first response instead of re-running the work. Implemented as a `CommandHandler`-refining protocol (conform to opt in) whose reserve/replay/store run **inside the command's own transaction**, so the de-duplication record and the command's writes commit atomically. The concrete store binding lives in `Integration/Fluent/`; the edge extraction in `Integration/Vapor/`.
 
 - `IdempotencyKey` — validated header value type (request metadata, not a DTO field).
-- `RequestFingerprint` — SHA-256 of the canonical payload; detects same-key-different-body misuse. Scope defaults to `command.payload`; a handler overrides `IdempotentCommandHandler.fingerprint(for:)` to fold in identity carried outside the payload (e.g. a route parameter like `featureId`).
+- `RequestFingerprint` — SHA-256 of the canonical payload; detects same-key-different-body misuse. Scope defaults to `command.payload`; a handler overrides `IdempotentCommandHandler.fingerprint(for:)` to fold in identity carried outside the payload (e.g. a route parameter like `itemId`).
 - `IdempotencyRecord` / `StoredResponse` / `IdempotencyStatus` — the persisted record + captured response; `IdempotencyReservation` / `IdempotencyTicket` are the read-phase outcome and the proceed-token threaded to the write phase.
-- `IdempotencyStore` — read-phase `reserve` + write-phase `complete` (the split honours Firestore's no-read-after-write rule).
+- `IdempotencyStore` — read-phase `reserve` + write-phase `complete` (the split keeps the contract bindable on stores that forbid a read after a transaction's first write).
 - `IdempotencyConfiguration` — `IdempotencyScope` (default `actorAndCommandType`), TTL, `InFlightStrategy` (default `rejectConflict`).
 - `IdempotentCommandHandler` — a protocol refining `CommandHandler` that supplies an idempotent `handle` default (a handler opts in by conforming); `IdempotencyComponents` bundles its store factory + configuration; `IdempotencyError` — `malformedKey` / `requestInProgress` / `fingerprintMismatch`.
 
@@ -40,4 +40,4 @@ Fault handling around outbound calls — retries for transient failures, a circu
 
 All three share the `execute { … }` shape and nest, limiter innermost: `policy.execute { breaker.execute { limiter.execute { … } } }`.
 
-The Firestore-aware preset (`RetryPolicy.firestore`, retrying only `FirestoreError.isRetryable`) lives in `Integration/Firestore/`.
+Store- or transport-specific presets are bindings, not `Lib` code — define them as a `RetryPolicy` extension under `Integration/<Store>/`. None ships here: what counts as a transient failure is the project's call.

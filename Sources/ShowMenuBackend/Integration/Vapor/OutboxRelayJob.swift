@@ -15,9 +15,10 @@ import Queues
 /// `relay.drain()` on each scheduled tick. Registered/scheduled in
 /// `App/Outbox+Vapor.swift`.
 ///
-/// > Alternative relay: a Firestore Cloud Function triggered on outbox-document
-/// > creation could publish rows with lower latency. The polling job here is the
-/// > portable default (no Functions deployment, works against any store).
+/// > Alternative relays: a change-stream / CDC trigger firing on outbox-row
+/// > insertion, or an external scheduler hitting a drain endpoint, would publish
+/// > with lower latency. The polling job here is the portable default — it needs
+/// > no store-specific trigger mechanism and no extra deployment unit.
 struct OutboxRelayJob: AsyncScheduledJob {
     let relay: OutboxRelay
 

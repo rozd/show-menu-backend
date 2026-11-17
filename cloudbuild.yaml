@@ -14,9 +14,13 @@
 # secret and never lands in an image layer.
 #
 # The Cloud Run URL is deterministic (https://<service>-<projectNumber>.<region>.run.app),
-# so the OIDC audiences and callback URL are known before the first deploy and no
-# second "URL fix-up" deploy is needed. The audience must match the URL the callers
-# (Eventarc forwarders, Cloud Scheduler) use exactly, or requests fail with a silent 401.
+# so the LiqPay callback URL is known before the first deploy and no second
+# "URL fix-up" deploy is needed.
+#
+# TODO before the first Postgres deploy: the service needs a Postgres DATABASE_URL
+# (Secret Manager, mounted via --update-secrets) and the Passage signing keys (JWKS,
+# Secret Manager as well). Neither is wired below yet; without DATABASE_URL the app
+# falls back to in-memory SQLite, which is not acceptable in production.
 steps:
   # Step 1: pick the image tag (git tag on release builds, else _TAG / short SHA).
   - name: 'gcr.io/cloud-builders/git'
@@ -75,13 +79,7 @@ steps:
         SERVICE_URL=https://${_SERVICE_NAME}-$PROJECT_NUMBER.${_REGION}.run.app
         SA=${_SA_NAME}@$PROJECT_ID.iam.gserviceaccount.com
 
-        ENV_VARS="^|^GCP_PROJECT_ID=$PROJECT_ID"
-        ENV_VARS="$${ENV_VARS}|GCP_CLOUD_RUN_SERVICE_URL=$${SERVICE_URL}"
-        ENV_VARS="$${ENV_VARS}|EVENTARC_OIDC_AUDIENCE=$${SERVICE_URL}"
-        ENV_VARS="$${ENV_VARS}|SCHEDULER_OIDC_AUDIENCE=$${SERVICE_URL}"
-        ENV_VARS="$${ENV_VARS}|EVENTARC_ALLOWED_SERVICE_ACCOUNTS=${_EVENTARC_ALLOWED_SERVICE_ACCOUNTS}"
-        ENV_VARS="$${ENV_VARS}|SCHEDULER_ALLOWED_SERVICE_ACCOUNTS=${_SCHEDULER_ALLOWED_SERVICE_ACCOUNTS}"
-        ENV_VARS="$${ENV_VARS}|LIQPAY_CALLBACK_URL=$${SERVICE_URL}/api/v1/payments/liqpay/callback"
+        ENV_VARS="^|^LIQPAY_CALLBACK_URL=$${SERVICE_URL}/api/v1/payments/liqpay/callback"
         ENV_VARS="$${ENV_VARS}|LIQPAY_RESULT_URL=${_LIQPAY_RESULT_URL}"
         REF="$TAG_NAME"
         if [ -z "$$REF" ]; then REF="$BRANCH_NAME"; fi
@@ -111,9 +109,6 @@ substitutions:
   _REPOSITORY_NAME: show-menu-backend-repo
   _SERVICE_NAME: show-menu-backend
   _SA_NAME: show-menu-api
-  # Comma-separated service-account emails allowed to call the Eventarc / Scheduler endpoints.
-  _EVENTARC_ALLOWED_SERVICE_ACCOUNTS: show-menu-dev@appspot.gserviceaccount.com
-  _SCHEDULER_ALLOWED_SERVICE_ACCOUNTS: show-menu-scheduler@show-menu-dev.iam.gserviceaccount.com
   _LIQPAY_RESULT_URL: https://show-menu-dev.web.app
 timeout: 1800s
 options:

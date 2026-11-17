@@ -2,7 +2,7 @@ import Foundation
 import Logging
 
 /// Integration event handler that removes the local `User` record when
-/// `UserDeletedIntegrationEvent` is received from Firebase Auth.
+/// `UserDeletedIntegrationEvent` is received.
 struct UserDeletedIntegrationEventHandler: IntegrationEventHandler {
     typealias Event = UserDeletedIntegrationEvent
 
@@ -22,8 +22,8 @@ struct UserDeletedIntegrationEventHandler: IntegrationEventHandler {
             )
         )
 
-        // This removal is initiated by the platform (mirroring a Firebase Auth
-        // deletion), not an end user — run it as the trusted system principal so
+        // This removal is initiated by the platform reacting to an upstream
+        // deletion, not by an end user — run it as the trusted system principal so
         // the authorization PEP in UserRemoveUseCase passes via the normal rule.
         try await RequestContext.$principal.withValue(SystemPrincipal()) {
             try await commandHandler.handle(command)

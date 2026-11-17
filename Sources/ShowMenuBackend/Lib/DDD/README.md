@@ -8,6 +8,7 @@ Domain-Driven Design tactical primitives. Concrete implementations live in each 
 - `DataSource/` — `DataSource` / `QueryableDataSource` + query/filter/order types.
 - `Mapper/` — entity ⇄ model ⇄ DTO conversion.
 - `Specification/` — composable domain-state rules (`Specification` + and/or/not combinators).
-- `UnitOfWork/` — `UnitOfWork` / `UnitOfWorkContext` (transaction + domain-event collection).
+- `UnitOfWork/` — `UnitOfWork` / `UnitOfWorkContext` (transaction + domain-event collection + outbox channel).
 - `UseCase/` — `UseCase` protocol.
-- `Error/` — `DomainError`, `ValidationError`, `ApplicationError`, `MappingError`.
+- `Outbox/` — transactional outbox: `Outbox`, `OutboxStore`, `OutboxMessage`, `OutboxIntegrationEventChannel`, `OutboxRelay`.
+- `Error/` — `DomainError`, `ValidationError`, `ApplicationError`, `MappingError`, `ConcurrencyError`.

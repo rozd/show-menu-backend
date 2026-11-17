@@ -37,7 +37,7 @@ protocol DataSource<Model>: Sendable {
 extension DataSource {
 
     /// Default: ignore the token and update unconditionally. Versioned stores
-    /// (e.g. Firestore over a `VersionedModel`) override this with real CAS.
+    /// (those whose `Model` is a `VersionedModel`) override this with real CAS.
     func update(model: Model, ifMatching expected: Version) async throws -> Version {
         try await update(model: model)
         return .none

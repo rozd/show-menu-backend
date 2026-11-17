@@ -26,7 +26,7 @@ import Logging
 ///   (non-transactional) store and the real publication channel.
 struct Outbox: Sendable {
 
-    /// Logical store / Firestore collection name for outbox rows.
+    /// Logical store name (collection / table) holding outbox rows.
     var collection: String
     /// Maximum messages drained (and pruned) per relay run.
     var batchSize: Int

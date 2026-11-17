@@ -14,15 +14,14 @@ Always pass `--project=show-menu-dev` to gcloud; a developer's active config may
 5. Rollback: `gcloud run services update-traffic show-menu-backend --project=show-menu-dev --region=europe-west1 --to-revisions=<REVISION>=100`.
 
 ## One-time bootstrap
-Prerequisite: **billing enabled** on `show-menu-dev` (Artifact Registry, Cloud Build, Scheduler need it).
+Prerequisite: **billing enabled** on `show-menu-dev` (Artifact Registry and Cloud Build need it).
 
 ```bash
 P=show-menu-dev; R=europe-west1
-gcloud services enable cloudbuild run artifactregistry secretmanager cloudscheduler eventarc cloudfunctions iamcredentials --project=$P
+gcloud services enable cloudbuild run artifactregistry secretmanager --project=$P
 gcloud artifacts repositories create show-menu-backend-repo --repository-format=docker --location=$R --project=$P
 gcloud iam service-accounts create show-menu-api --project=$P          # runtime identity
-gcloud iam service-accounts create show-menu-scheduler --project=$P    # Cloud Scheduler caller
-for role in roles/datastore.user roles/secretmanager.secretAccessor roles/iam.serviceAccountTokenCreator; do
+for role in roles/secretmanager.secretAccessor; do
   gcloud projects add-iam-policy-binding $P --member=serviceAccount:show-menu-api@$P.iam.gserviceaccount.com --role=$role
 done
 # Fine-grained, read-only PAT (Contents: read) on rozd/show-menu-contracts, used by Cloud Build to
@@ -44,44 +43,28 @@ the build always reads `latest`. GitHub Actions uses a separate repo secret, `SH
 If the build runs as a different service account than the default one above, grant that account `roles/secretmanager.secretAccessor` instead.
 Then connect the GitHub repo in Cloud Build and import the trigger from `.infra/triggers/production-deploy.yaml`.
 
-### Forwarder functions, Scheduler
-Deploy `auth-forwarder`, `firestore-forwarder`, `identity-blocking` per `cloud-functions/README.md`, grant their
-service accounts `roles/run.invoker` on `show-menu-backend`, and list them in the trigger substitution
-`_EVENTARC_ALLOWED_SERVICE_ACCOUNTS`.
-
-**Webhook path.** The Eventarc webhook is `POST /api/v1/events/eventarc` (it was `POST /`). The forwarders'
-`BACKEND_WEBHOOK_URL` must be `https://show-menu-backend-$NUM.$R.run.app/api/v1/events/eventarc`; deploy the forwarders
-together with the backend release that moves the route, or events are rejected in between. The OIDC **audience does not
-change**: the backend verifies the token against `EVENTARC_OIDC_AUDIENCE` (fallback `SCHEDULER_OIDC_AUDIENCE`), which
-`cloudbuild.yaml` sets to the bare service URL, so the forwarders keep requesting tokens with the service URL as audience
-(not the full webhook path). The forwarder code lives in `show-menu-firebase`; its URL/audience handling was not re-verified here. Scheduler:
-```bash
-URL=https://show-menu-backend-$NUM.$R.run.app
-gcloud scheduler jobs create http check-expired-subscriptions --project=$P --location=$R --schedule="0 0 * * *" --time-zone=UTC \
-  --uri=$URL/api/v1/subscriptions/jobs/check-expired --http-method=POST \
-  --oidc-service-account-email=show-menu-scheduler@$P.iam.gserviceaccount.com --oidc-token-audience=$URL
-```
+### Database
+Production requires a Postgres `DATABASE_URL` (hosting is not decided yet). Without it the app falls back to an
+in-memory SQLite database, which loses all accounts and tokens on every restart and must never serve production.
+Store the URL in Secret Manager and mount it on the service with `--update-secrets`; also provide the Passage signing
+keys (`JWKS` or `JWKS_FILE_PATH`) the same way. `cloudbuild.yaml` does not wire either yet (see the TODO there), so wire
+them before the first Postgres deploy.
 
 ## Runtime configuration
 | Variable | Source |
 |---|---|
-| `GCP_PROJECT_ID`, `GCP_CLOUD_RUN_SERVICE_URL`, `EVENTARC_OIDC_AUDIENCE`, `SCHEDULER_OIDC_AUDIENCE`, `LIQPAY_CALLBACK_URL` | derived in `cloudbuild.yaml` from the deterministic URL |
-| `EVENTARC_ALLOWED_SERVICE_ACCOUNTS`, `SCHEDULER_ALLOWED_SERVICE_ACCOUNTS`, `LIQPAY_RESULT_URL` | trigger substitutions |
+| `LIQPAY_CALLBACK_URL` | derived in `cloudbuild.yaml` from the deterministic URL |
+| `LIQPAY_RESULT_URL` | trigger substitution |
 | `LIQPAY_PUBLIC_KEY`, `LIQPAY_PRIVATE_KEY` | Secret Manager |
+| `DATABASE_URL` (required in production), `JWKS` | Secret Manager (not yet wired in `cloudbuild.yaml`) |
 | `BUILD_BRANCH_NAME`, `BUILD_SHORT_SHA` | Cloud Build built-ins |
-
-An audience that differs from the URL callers use fails with a silent 401.
 
 Health check: `curl https://show-menu-backend-$NUM.$R.run.app/api/v1/health` returns `{"status":"ok"}` (public; the old `/health` is gone).
 
-## Cutover state (S17, 2026-11-06)
-No Node code is deployed on `show-menu-dev`: `firebase functions:list` shows only the forwarders (`onUserCreated`, `onUserDeleted`, `onAccountCreated`) and `identity-beforeCreated` / `identity-beforeSignedIn`, which the Vapor backend needs, and `firebase ext:list` shows no extension. The double-fire caveat no longer applies. Always pass `--project show-menu-dev`: the default gcloud config on the dev machine may point at another project.
+## Manual steps
 
-### Firestore rules
-`show-menu-firebase/firestore.rules` is the real rule set (it replaced the test-mode rule that expired 2027-01-01). Deploy with `firebase deploy --only firestore:rules --project show-menu-dev` from `show-menu-firebase`; test with `npm --prefix rules-tests test`. `storage.rules` is still open (`allow read, write: if true`) and is **not** covered by S17.
-
-### Steps that need the LiqPay merchant console (manual)
-1. **Rotate the sandbox keys.** In the LiqPay merchant console issue a new public/private key pair (the old pair is in git history of `show-menu-firebase`). Then:
+### LiqPay merchant console
+1. **Rotate the sandbox keys.** In the LiqPay merchant console issue a new public/private key pair. Then:
    ```bash
    P=show-menu-dev
    printf '%s' "<new public key>"  | gcloud secrets versions add LIQPAY_PUBLIC_KEY  --data-file=- --project=$P
@@ -90,13 +73,4 @@ No Node code is deployed on `show-menu-dev`: `firebase functions:list` shows onl
    ```
    Confirm the secrets are mounted as `latest` (`gcloud run services describe show-menu-backend --region=europe-west1 --project=$P`); disable the old versions afterwards.
 2. **Repoint the callback.** Set the merchant `server_url` to `https://show-menu-backend-329418335969.europe-west1.run.app/api/v1/payments/liqpay/callback` (the same value as `LIQPAY_CALLBACK_URL`). Checkout also sends it per request, so this only matters for subscription renewals LiqPay initiates.
-3. **Verify.** Run one sandbox purchase from the Flutter dev build (`--dart-define=API_BASE_URL=https://show-menu-backend-329418335969.europe-west1.run.app/api`) and confirm the session reaches `success` and a `subscriptions` document exists.
-
-### One-off reconcile (pre-cutover drain)
-Needs the scheduler identity, so run it as someone who can mint tokens for `show-menu-scheduler`:
-```bash
-URL=https://show-menu-backend-329418335969.europe-west1.run.app
-ID=$(gcloud auth print-identity-token --project show-menu-dev \
-  --impersonate-service-account=show-menu-scheduler@show-menu-dev.iam.gserviceaccount.com --audiences=$URL --include-email)
-curl -s -X POST -H "Authorization: Bearer $ID" "$URL/api/v1/subscriptions/jobs/check-expired?reconcileDays=365"
-```
+3. **Verify.** Run one sandbox purchase from the Flutter dev build (`--dart-define=API_BASE_URL=https://show-menu-backend-329418335969.europe-west1.run.app/api`) and confirm the session reaches `success` and a subscription exists.

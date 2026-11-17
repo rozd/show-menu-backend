@@ -87,7 +87,7 @@ struct RateLimit: Sendable, Equatable {
 /// operation outside the actor, so slow operations overlap freely. Add a bounded
 /// task group or a semaphore if you also need a concurrency cap.
 ///
-/// **Per-process and in-memory.** Every Cloud Run instance gets its own limiter,
+/// **Per-process and in-memory.** Every app instance gets its own limiter,
 /// so size the limit per instance (vendor quota ÷ max instances), or reach for a
 /// distributed limiter when a single global quota must hold.
 ///

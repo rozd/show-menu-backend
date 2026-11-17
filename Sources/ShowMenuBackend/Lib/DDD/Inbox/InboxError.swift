@@ -17,13 +17,8 @@ enum InboxError: Error, Equatable {
     case corruptRecord(id: String)
 
     /// Lost the record-insert race to a concurrent delivery of the same event:
-    /// the store's `create` hit ALREADY_EXISTS (`exists == false` precondition),
-    /// meaning the winner's marker committed first. The store maps that to this
-    /// error. In practice Firestore buffers the `create` and enforces the
-    /// precondition at commit, where the transaction runner retries and the
-    /// retry's `reserve` skips silently as `.alreadyProcessed`; a commit-time
-    /// conflict that outlasts every attempt escapes the unit of work as a mapped
-    /// `FirestoreError`, not this case. Either way the outcome is correct (the
-    /// winner did the work); the dispatcher logs and swallows the error.
+    /// the winner's marker committed first, so this transaction — work included —
+    /// is aborted. Correct by outcome (the winner did the work); the dispatcher
+    /// logs and swallows it, and there is no queue retry for the loser, by design.
     case duplicateEvent(id: String)
 }

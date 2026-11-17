@@ -79,10 +79,12 @@ protocol IntegrationEventDispatcher: Sendable {
 
 // MARK: - In-Memory Dispatcher
 
-/// In-memory dispatcher for testing and local development.
+/// In-process dispatcher: invokes registered handlers directly, in the calling
+/// process. "InProcess", not "InMemory" — the name describes where handlers run,
+/// not persistence.
 ///
-/// Follows the same pattern as `InMemoryDomainEventDispatcher`.
-actor InMemoryIntegrationEventDispatcher: IntegrationEventDispatcher {
+/// Follows the same pattern as `InProcessDomainEventDispatcher`.
+actor InProcessIntegrationEventDispatcher: IntegrationEventDispatcher {
     private struct HandlerBox: Sendable {
         let handle: @Sendable (any IntegrationEvent) async -> Void
     }
@@ -129,8 +131,6 @@ actor InMemoryIntegrationEventDispatcher: IntegrationEventDispatcher {
                 return
             }
             do {
-                // Bind the event id so an `InboxedCommandHandler` downstream can
-                // de-duplicate redeliveries of this event per consumer.
                 try await RequestContext.$integrationEventId.withValue(typed.id) {
                     try await handler.handle(typed)
                 }

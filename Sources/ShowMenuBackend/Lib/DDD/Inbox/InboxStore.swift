@@ -31,7 +31,7 @@ typealias InboxStoreFactory = @Sendable (_ ctx: any UnitOfWorkContext) -> any In
 /// ```
 ///
 /// Implementations bind these to a transaction supplied at construction (e.g.
-/// `FirestoreInboxStore` over `ctx.transaction`). The in-flight guard for
+/// `FluentInboxStore` over `ctx.transaction`). The in-flight guard for
 /// the *new-event* race is a transactional `create` with a uniqueness
 /// precondition, enforced atomically at commit.
 protocol InboxStore: Sendable {

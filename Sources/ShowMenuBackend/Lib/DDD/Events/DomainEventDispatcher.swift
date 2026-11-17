@@ -11,7 +11,7 @@ protocol DomainEventDispatcher: Sendable {
 
 // MARK: - Default Implementation
 
-actor InMemoryDomainEventDispatcher: DomainEventDispatcher {
+actor InProcessDomainEventDispatcher: DomainEventDispatcher {
     private struct HandlerBox: Sendable {
         let handle: @Sendable (any DomainEvent) async -> Void
     }

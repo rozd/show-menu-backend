@@ -33,9 +33,9 @@ enum IdempotencyScope: Sendable {
     /// Derives the stable, store-safe record id for this scope.
     ///
     /// The scope discriminator and key are hashed (SHA-256) into a fixed,
-    /// path-safe document id — the raw key may contain characters Firestore
-    /// rejects in a document id (e.g. `/`), and hashing also avoids leaking the
-    /// key value into storage keys.
+    /// path-safe record id — the raw key may contain characters a store rejects
+    /// in a document id / primary key (e.g. `/`), and hashing also avoids leaking
+    /// the key value into storage keys.
     func recordId(key: IdempotencyKey, commandType: String, principalId: String?) -> String {
         let discriminator: String
         switch self {
@@ -59,9 +59,9 @@ enum IdempotencyScope: Sendable {
 /// flight (an in-progress record, or a lost commit race after the runner's
 /// retries).
 ///
-/// Default — and the only behaviour implemented for the stateless Cloud Run +
-/// Firestore binding — is ``rejectConflict``: the duplicate is rejected with
-/// ``IdempotencyError/requestInProgress(key:)`` (→ `409`) and the client retries,
+/// Default — and the only behaviour implemented — is ``rejectConflict``: the
+/// duplicate is rejected with ``IdempotencyError/requestInProgress(key:)``
+/// (→ `409`) and the client retries,
 /// by which point the original has usually committed and the retry *replays*.
 ///
 /// *Block-and-wait* was considered and deliberately left out: a stateless

@@ -11,16 +11,16 @@
 ///
 /// The protocol is store-agnostic on purpose — it says nothing about *where* the
 /// counter lives (a document field, a SQL column, a dictionary entry), only that
-/// the model exposes one. The Firestore adapter binds it in
-/// `Firestore+Concurrency` (to an integer `version` document field); a future SQL
-/// adapter could bind the same protocol to a `version` column.
+/// the model exposes one. The Fluent adapter binds it in
+/// `FluentDataSource+Concurrency`; another adapter would bind the same protocol to
+/// a `version` column.
 ///
 /// A store with **no versioning mechanism simply doesn't conform**: ``DataSource``
 /// ships default no-op check-and-set methods, so versioning is strictly opt-in
 /// and un-versioned models keep working unchanged.
 ///
-/// `version == nil` means the document predates versioning (or was just created
-/// without one); the binding treats it as `Version.none`, so existing documents
+/// `version == nil` means the record predates versioning (or was just created
+/// without one); the binding treats it as `Version.none`, so existing records
 /// adopt optimistic concurrency on their first write with **no data migration**.
 protocol VersionedModel: Sendable {
     var version: Int? { get set }

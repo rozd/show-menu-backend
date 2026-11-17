@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 
 # Create a Domain Entity (AggregateRoot)
 
-You are creating a new Entity for this Vapor/Firebase backend. The optional hint is: **$ARGUMENTS**
+You are creating a new Entity for this Vapor DDD/CQRS backend. The optional hint is: **$ARGUMENTS**
 
 This skill creates the smallest atomic DDD unit — the Domain layer for an Entity. It produces 4 source files and 1 test file, suitable for adding a second entity to an existing module or for incrementally building a new module.
 
@@ -15,7 +15,7 @@ This skill creates the smallest atomic DDD unit — the Domain layer for an Enti
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/` to find directory names.
-3. If `$ARGUMENTS` is provided, try to parse a module name and/or entity name from it (e.g., `Orders/OrderLine`, `Catalog`, `Order`).
+3. If `$ARGUMENTS` is provided, try to parse a module name and/or entity name from it (e.g., `Orders/OrderLine`, `Items`, `Order`).
 
 ## Step 1 — Ask Questions
 
@@ -23,7 +23,7 @@ Use `AskUserQuestion` to gather information. Combine into as few calls as possib
 
 ### Question 1: Target Module
 Ask: "Which module should this Entity belong to?" with options dynamically built from discovered modules, plus an option to create a new module directory:
-- **Catalog** — `Modules/Catalog/`
+- **IAM** — `Modules/IAM/`
 - **Orders** — `Modules/Orders/`
 - (etc., one per discovered module)
 - **New module** — Create a new module directory
@@ -39,7 +39,7 @@ Skip this question if the entity name was unambiguously identified from `$ARGUME
 
 ### Question 3: Properties
 Ask: "What properties should {Entity} have?" with options:
-- **Use defaults** — `name: String` and `description: String?` (the simple case; `Catalog/Feature` shows `LocalizedString` fields and a partial update)
+- **Use defaults** — `name: String` and `description: String?` (same as the IAM module)
 - **Specify properties** — The user will list them as `propertyName: Type` pairs
 
 If the user specifies properties, parse them as `propertyName: Type` pairs. Optional properties should have `?` suffix on the type (e.g., `description: String?`).
@@ -73,7 +73,7 @@ From the module name and entity name, derive all type names:
 | Event case deleted | `.{entity}Deleted` | `.orderLineDeleted` |
 | Not-found error | `{Entity}NotFoundError` | `OrderLineNotFoundError` |
 | Repository protocol | `{Entity}Repository` | `OrderLineRepository` |
-| Firestore model ref | `{Entity}Model` | `OrderLineModel` |
+| Store model ref | `{Entity}Model` | `OrderLineModel` |
 | DTO ref | `{Entity}DTO` | `OrderLineDTO` |
 | ID property (camelCase) | `{entity}Id` | `orderLineId` |
 
@@ -82,7 +82,7 @@ From the module name and entity name, derive all type names:
 **All source files** go under `Sources/{APP_NAME}/Modules/{Module}/`.
 **All test files** go under `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
 
-Read the corresponding Catalog module file as reference before writing each file. Follow the exact same patterns, protocols, and conventions.
+Read the corresponding IAM module file as reference before writing each file. Follow the exact same patterns, protocols, and conventions.
 
 ### File 1: `Domain/Entity/{Entity}.swift`
 
@@ -95,6 +95,11 @@ final class {Entity}: AggregateRoot, @unchecked Sendable {
     let id: {Entity}.Id
     let events: DomainEventRecorder<Event> = .init()
 
+    /// Opaque optimistic-concurrency token required by `AggregateRoot`. Loaded
+    /// with the aggregate, carried back on write, advanced by the persistence
+    /// layer — never inspected or incremented by the domain.
+    var version: Version = .none
+
     private(set) var {prop1}: {Type1}
     private(set) var {prop2}: {Type2}?
     // ... user-specified properties as private(set) var ...
@@ -106,6 +111,7 @@ final class {Entity}: AggregateRoot, @unchecked Sendable {
         {prop1}: {Type1},
         {prop2}: {Type2}? = nil,
         // ... user-specified properties ...
+        version: Version = .none,
         createdAt: Date? = .now,
         updatedAt: Date? = nil
     ) {
@@ -113,6 +119,7 @@ final class {Entity}: AggregateRoot, @unchecked Sendable {
         self.{prop1} = {prop1}
         self.{prop2} = {prop2}
         // ... user-specified properties ...
+        self.version = version
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -157,7 +164,7 @@ extension {Entity} {
 }
 ```
 
-- Reference: `Modules/Catalog/Domain/Entity/Feature.swift`
+- Reference: `Modules/IAM/Domain/Entity/User.swift`
 - Only required `String` properties get validation guards
 - The `update()` method accepts all user properties (not `id`, `createdAt`, `updatedAt`)
 - Non-String or optional properties are excluded from `validate()` unless the user specifies custom validation
@@ -197,7 +204,7 @@ struct {Entity}Event: DomainEvent {
 }
 ```
 
-- Reference: `Modules/Catalog/Domain/Event/FeatureEvent.swift`
+- Reference: `Modules/IAM/Domain/Event/UserEvent.swift`
 - Custom event raw values should be lowercase action words (e.g., `"archived"`, `"published"`)
 - Custom event cases follow `{entity}{CustomAction}` naming (e.g., `.orderLineArchived`)
 
@@ -211,7 +218,7 @@ struct {Entity}NotFoundError: Error {
 }
 ```
 
-- Reference: `Modules/Catalog/Domain/Error/FeatureError.swift`
+- Reference: `Modules/IAM/Domain/Error/UserError.swift`
 
 ### File 4: `Domain/Repository/{Entity}Repository.swift`
 
@@ -222,7 +229,7 @@ protocol {Entity}Repository: Repository where Entity == {Entity}, Model == {Enti
 }
 ```
 
-- Reference: `Modules/Catalog/Domain/Repository/FeatureRepository.swift`
+- Reference: `Modules/IAM/Domain/Repository/UserRepository.swift`
 - **Note**: `{Entity}Model` and `{Entity}DTO` types do not exist yet. This creates a known compiler error until the Infrastructure and Application layers are added. Mention this in the summary.
 
 ### File 5: `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/{Entity}Tests.swift`
@@ -360,7 +367,7 @@ struct {Entity}Tests {
 - Use Swift Testing framework (`@Suite`, `@Test`, `#expect`)
 - `@testable import {APP_NAME}`
 - `make{Entity}()` helper with sensible defaults for all properties
-- Tests are pure entity unit tests — no Firestore, no UnitOfWork, no InMemoryDataSource
+- Tests are pure entity unit tests — no store, no UnitOfWork, no data source at all
 - One validation error test per `Error` case
 - Trailing commas in function calls and collections
 
@@ -373,7 +380,7 @@ After creating all files, output:
 3. **Next steps** — Suggest what to do next:
    - Use `/create-usecase` to add a UseCase (e.g., Create{Entity}) which will require building out the Application and Infrastructure layers
    - Use `/create-module` if you want a complete module with all layers at once
-   - Manually add Model, DTO, Mapper, DataSource, and Controller files following the Catalog module pattern
+   - Manually add Model, DTO, Mapper, DataSource, and Controller files following the IAM module pattern
 
 ## Important Rules
 

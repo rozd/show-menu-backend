@@ -16,8 +16,7 @@ struct CreateUserAccountCommandHandler: InboxedCommandHandler {
             params: .init(
                 userId: User.Id(rawValue: command.payload.userId),
                 email: command.payload.email,
-                name: command.payload.displayName,
-                avatarURL: command.payload.photoURL
+                displayName: command.payload.displayName
             )
         )
     }

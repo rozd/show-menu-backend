@@ -9,7 +9,7 @@ struct StubUnitOfWorkContext: UnitOfWorkContext {
     init(
         transaction: String,
         collector: any DomainEventCollector,
-        outbox: OutboxIntegrationEventChannel = OutboxIntegrationEventChannel(store: InMemoryOutboxStore())
+        outbox: OutboxIntegrationEventChannel = OutboxIntegrationEventChannel(store: RecordingOutboxStore())
     ) {
         self.transaction = transaction
         self.collector = collector
@@ -17,8 +17,8 @@ struct StubUnitOfWorkContext: UnitOfWorkContext {
     }
 }
 
-/// A `UnitOfWork` test double that mirrors `FirestoreTransactionUnitOfWork` behavior
-/// without Firestore. Creates an `InMemoryDomainEventCollector`, passes it
+/// A `UnitOfWork` test double that mirrors the real one's behaviour without a
+/// database. Creates an `InProcessDomainEventCollector`, passes it
 /// to the work closure via `StubUnitOfWorkContext`, drains events after
 /// completion, and forwards them to the dispatcher.
 ///
@@ -32,8 +32,8 @@ struct StubUnitOfWorkContext: UnitOfWorkContext {
 /// let spy = SpyDomainEventDispatcher()
 /// let uow = StubUnitOfWork(dispatcher: spy)
 /// try await uow.execute { ctx in
-///     let repo = FeatureRepository(context: ctx, dataSource: ds)
-///     try await repo.insert(entity: feature)
+///     let repo = UserRepository(context: ctx, dataSource: ds)
+///     try await repo.insert(entity: item)
 /// }
 /// // assert on uow.dispatchedEvents, spy.dispatchedEvents, or uow.committedOutbox
 /// ```
@@ -43,7 +43,7 @@ final class StubUnitOfWork: UnitOfWork, @unchecked Sendable {
     let dispatcher: any DomainEventDispatcher
 
     /// Outbox rows that survived a committed `execute` (empty after a rollback).
-    let committedOutbox = InMemoryOutboxStore()
+    let committedOutbox = RecordingOutboxStore()
 
     private let lock = NSLock()
     private var _dispatchedEvents: [any DomainEvent] = []
@@ -59,7 +59,7 @@ final class StubUnitOfWork: UnitOfWork, @unchecked Sendable {
     func execute<Result: Sendable>(
         _ work: @escaping @Sendable (StubUnitOfWorkContext) async throws -> Result
     ) async throws -> Result {
-        let collector = InMemoryDomainEventCollector()
+        let collector = InProcessDomainEventCollector()
         let buffer = BufferingOutboxStore(target: committedOutbox)
         let context = StubUnitOfWorkContext(
             transaction: "stub",

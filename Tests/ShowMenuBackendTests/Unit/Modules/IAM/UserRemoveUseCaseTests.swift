@@ -12,23 +12,23 @@ struct UserRemoveUseCaseTests {
     }
 
     private func makeSUT() -> (
-        ds: InMemoryDataSource<UserModel>,
-        collector: InMemoryDomainEventCollector,
+        ds: SpyDataSource<UserModel>,
+        collector: InProcessDomainEventCollector,
         context: StubUnitOfWorkContext
     ) {
-        let ds = InMemoryDataSource<UserModel>(id: { $0.id })
-        let collector = InMemoryDomainEventCollector()
+        let ds = SpyDataSource<UserModel>(id: { $0.id })
+        let collector = InProcessDomainEventCollector()
         let ctx = StubUnitOfWorkContext(transaction: "stub", collector: collector)
         return (ds, collector, ctx)
     }
 
     private func makeUseCase(
-        ds: InMemoryDataSource<UserModel>,
+        ds: SpyDataSource<UserModel>,
         ctx: StubUnitOfWorkContext
     ) -> UserRemoveUseCase {
         let mapper = self.mapper
         let repositoryFactory: RepositoryFactory<any UserRepository> = { ctx in
-            FirestoreUserRepository(
+            DefaultUserRepository(
                 mapper: mapper,
                 dataSourceFactory: { _, _ in ds },
                 context: ctx

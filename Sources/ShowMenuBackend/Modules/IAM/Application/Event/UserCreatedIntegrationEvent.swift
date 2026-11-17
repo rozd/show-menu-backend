@@ -1,10 +1,13 @@
 import Foundation
 
-/// Integration event published when a Firebase Auth user is created.
+/// Integration event announcing that a user account came into existence.
 ///
-/// Published by `EventarcController.handleUserCreated()` upon receiving
-/// a `google.firebase.auth.user.v1.created` CloudEvent forwarded by the
-/// auth-forwarder Cloud Function. Consumed by `UserCreatedIntegrationEventHandler`.
+/// Consumed by `UserCreatedIntegrationEventHandler`, which onboards the local
+/// `User` record. In this template the event originates **in-process** (publish
+/// it wherever accounts are provisioned) and the dispatcher hands it straight to
+/// that handler. In a real deployment the producer would be a separate service —
+/// an identity provider's webhook, say — and the event would arrive over a
+/// message bus; the transactional outbox exists to make that hand-off reliable.
 struct UserCreatedIntegrationEvent: IntegrationEvent {
     static let kind: String = "users.created"
 
@@ -14,8 +17,6 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
     let userId: String
     let email: String?
     let displayName: String?
-    /// Optional: events recorded before this field existed decode with `nil`.
-    let photoURL: String?
     let registeredAt: Date
 
     init(
@@ -23,7 +24,6 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
         userId: String,
         email: String?,
         displayName: String?,
-        photoURL: String? = nil,
         registeredAt: Date = .now,
         correlationId: TraceID? = nil
     ) {
@@ -36,7 +36,6 @@ struct UserCreatedIntegrationEvent: IntegrationEvent {
         self.userId = userId
         self.email = email
         self.displayName = displayName
-        self.photoURL = photoURL
         self.registeredAt = registeredAt
     }
 }

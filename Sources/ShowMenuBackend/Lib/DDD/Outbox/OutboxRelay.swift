@@ -16,8 +16,8 @@ import Logging
 ///
 /// **Delivery is at-least-once.** A crash after publish but before
 /// `markPublished` republishes the message on the next drain; downstream
-/// consumers must dedup (see ``InboxedCommandHandler``, the consumer-side
-/// Inbox). No attempt is made at exactly-once.
+/// consumers must dedup — the Inbox (`Lib/DDD/Inbox/`, `InboxedCommandHandler`)
+/// is that consumer-side half. No attempt is made at exactly-once delivery.
 ///
 /// **Ordering is best-effort FIFO.** Messages are drained in (`createdAt`,
 /// `sequence`) order and published *sequentially* to preserve it. Strict

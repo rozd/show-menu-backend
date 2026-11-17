@@ -47,7 +47,7 @@ struct OutboxIntegrationEventChannelTests {
 
     @Test("record encodes the event and appends a pending message")
     func record_appendsPending() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
         let channel = OutboxIntegrationEventChannel(store: store, coder: coder, now: { fixedNow })
 
@@ -74,7 +74,7 @@ struct OutboxIntegrationEventChannelTests {
 
     @Test("sequence increments across records within one transaction")
     func record_sequenceIncrements() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
         let channel = OutboxIntegrationEventChannel(store: store, coder: coder, now: { fixedNow })
 
@@ -88,12 +88,12 @@ struct OutboxIntegrationEventChannelTests {
 
     @Test("a store append failure propagates so the transaction can roll back")
     func record_appendFailurePropagates() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         await store.setFailAppend(true)
         let coder = await makeCoder()
         let channel = OutboxIntegrationEventChannel(store: store, coder: coder, now: { fixedNow })
 
-        await #expect(throws: InMemoryOutboxStore.Failure.self) {
+        await #expect(throws: RecordingOutboxStore.Failure.self) {
             try await channel.record(OutboxTestEvent(value: "x"))
         }
     }
@@ -110,7 +110,7 @@ struct OutboxRelayTests {
 
     @Test("drain publishes pending messages in FIFO order and marks them published")
     func drain_publishesAndMarks() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
 
         let m0 = try message("a", sequence: 0, at: fixedNow, coder: coder)
@@ -141,7 +141,7 @@ struct OutboxRelayTests {
 
     @Test("a publish failure leaves the message pending for retry with backoff (at-least-once)")
     func drain_publishFailureRetains() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
         let message = try message("x", sequence: 0, at: fixedNow, coder: coder)
         await store.seed(message)
@@ -170,7 +170,7 @@ struct OutboxRelayTests {
 
     @Test("a failed message is skipped until its backoff elapses, then republished")
     func drain_retryAfterBackoff() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
         let message = try message("x", sequence: 0, at: fixedNow, coder: coder)
         await store.seed(message)
@@ -210,7 +210,7 @@ struct OutboxRelayTests {
 
     @Test("drain prunes published rows older than the retention window")
     func drain_cleanup() async throws {
-        let store = InMemoryOutboxStore()
+        let store = RecordingOutboxStore()
         let coder = await makeCoder()
 
         // Old published row (well past retention).
@@ -274,37 +274,5 @@ struct OutboxUnitOfWorkTests {
 
         let committed = await uow.committedOutbox.appended
         #expect(committed.isEmpty) // no committed state ⇒ no orphaned outbox row
-    }
-}
-
-// MARK: - Firestore model
-
-@Suite("Outbox — Firestore model")
-struct OutboxMessageModelTests {
-
-    private func makeMessage() async throws -> OutboxMessage {
-        let coder = await makeCoder()
-        return try OutboxMessage.pending(
-            from: OutboxTestEvent(value: "v"), sequence: 0, at: fixedNow, coder: coder
-        )
-    }
-
-    @Test("a valid model round-trips back to its message")
-    func roundTrip() async throws {
-        let message = try await makeMessage()
-        let restored = try OutboxMessageModel(message).toMessage()
-        #expect(restored.id == message.id)
-        #expect(restored.kind == message.kind)
-        #expect(restored.payload == message.payload)
-        #expect(restored.sequence == message.sequence)
-    }
-
-    @Test("a malformed document id fails fast instead of inventing an identity")
-    func malformedIdThrows() async throws {
-        var model = try await OutboxMessageModel(makeMessage())
-        model.id = "not-a-uuid"
-        #expect(throws: OutboxMessageModel.DecodingError.self) {
-            _ = try model.toMessage()
-        }
     }
 }

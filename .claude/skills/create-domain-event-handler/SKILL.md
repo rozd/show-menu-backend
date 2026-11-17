@@ -13,14 +13,14 @@ You are creating a `DomainEventHandler` that reacts to a domain event within an 
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/`.
-3. If `$ARGUMENTS` is provided, try to parse a module name and/or event kind from it (e.g., `Catalog/featureCreated`, `Catalog`, `FeatureCreated`).
+3. If `$ARGUMENTS` is provided, try to parse a module name and/or event kind from it (e.g., `Items/itemCreated`, `Items`, `ItemCreated`).
 
 ## Step 1 — Discover Module Context
 
 For each candidate module, read its event file to discover available event kinds:
 
 - Read `Modules/{Module}/Domain/Event/{Entity}Event.swift` to find:
-  - The `{Entity}EventKind` enum and its cases (e.g., `.featureCreated`, `.featureUpdated`, `.featureDeleted`)
+  - The `{Entity}EventKind` enum and its cases (e.g., `.itemCreated`, `.itemUpdated`, `.itemDeleted`)
   - The `{Entity}Event` struct name
 
 Also read the entity file for context:
@@ -35,10 +35,10 @@ Ask: "Which module owns the domain event?" with options built from discovered mo
 Skip if unambiguously identified from `$ARGUMENTS`.
 
 ### Question 2: Event Kind
-Ask: "Which event kind should the handler react to?" with options built from the module's `{Entity}EventKind` enum. Example for Catalog:
-- **featureCreated** — React when a feature is created
-- **featureUpdated** — React when a feature is updated
-- **featureDeleted** — React when a feature is deleted
+Ask: "Which event kind should the handler react to?" with options built from the module's `{Entity}EventKind` enum. Example for Items:
+- **itemCreated** — React when an item is created
+- **itemUpdated** — React when an item is updated
+- **itemDeleted** — React when an item is deleted
 - **All kinds** — React to every event kind (no kind filter in handler)
 
 ### Question 3: Handler Action
@@ -51,17 +51,17 @@ If the user selects "Run a UseCase", also ask whether to use an existing UseCase
 
 ## Step 3 — Derive Names
 
-| Concept | Pattern | Example (Module=Catalog, Entity=Feature, Kind=featureCreated, Action=Notify) |
+| Concept | Pattern | Example (Module=Items, Entity=Item, Kind=itemCreated, Action=Notify) |
 |---|---|---|
-| Handler struct | `{Action}On{Entity}{PascalKind}Handler` | `NotifyOnFeatureCreatedHandler` |
-| Handler file | `Application/Event/Handler/Domain/{Action}On{Entity}{PascalKind}Handler.swift` | `NotifyOnFeatureCreatedHandler.swift` |
-| Event type | `{Entity}Event` | `FeatureEvent` |
-| Event kind | `.{entityKind}` | `.featureCreated` |
-| Test suite | `{Action}On{Entity}{PascalKind}HandlerTests` | `NotifyOnFeatureCreatedHandlerTests` |
+| Handler struct | `{Action}On{Entity}{PascalKind}Handler` | `NotifyOnItemCreatedHandler` |
+| Handler file | `Application/Event/Handler/Domain/{Action}On{Entity}{PascalKind}Handler.swift` | `NotifyOnItemCreatedHandler.swift` |
+| Event type | `{Entity}Event` | `ItemEvent` |
+| Event kind | `.{entityKind}` | `.itemCreated` |
+| Test suite | `{Action}On{Entity}{PascalKind}HandlerTests` | `NotifyOnItemCreatedHandlerTests` |
 
-Where `{PascalKind}` is the event kind case converted to PascalCase without the entity prefix (e.g., `featureCreated` → `Created`, `featureDeleted` → `Deleted`).
+Where `{PascalKind}` is the event kind case converted to PascalCase without the entity prefix (e.g., `itemCreated` → `Created`, `itemDeleted` → `Deleted`).
 
-If the handler reacts to **all kinds**, name it `{Action}On{Entity}EventHandler` (e.g., `AuditOnFeatureEventHandler`).
+If the handler reacts to **all kinds**, name it `{Action}On{Entity}EventHandler` (e.g., `AuditOnItemEventHandler`).
 
 ## Step 4 — Create the Handler
 
@@ -231,14 +231,14 @@ struct {HandlerName}Tests {
 
 #### For UseCase-delegating handlers:
 
-- Use `InMemoryDataSource<{Entity}Model>` and `StubUnitOfWork` to verify the UseCase was executed
+- Use `SpyDataSource<{Entity}Model>` (the test double in `Tests/{APP_NAME}Tests/Support/`, not the real `FluentDataSource` adapter) and `StubUnitOfWork` to verify the UseCase was executed
 - Assert domain events were dispatched through the StubUnitOfWork
 - Assert the data source reflects the expected changes
 
 ```swift
 @Test("handles {eventKind} by executing UseCase")
 func handles{PascalKind}() async throws {
-    let ds = InMemoryDataSource<{Entity}Model>(id: { $0.id })
+    let ds = SpyDataSource<{Entity}Model>(id: { $0.id })
     // Seed data if the UseCase fetches an existing entity
     // await ds.seed(model)
 
@@ -251,7 +251,7 @@ func handles{PascalKind}() async throws {
             {Action}{Entity}UseCase(
                 context: ctx,
                 repositoryFactory: { ctx in
-                    Firestore{Entity}Repository(
+                    Default{Entity}Repository(
                         mapper: {Entity}Mapper(),
                         dataSourceFactory: { _, _ in ds },
                         context: ctx
@@ -315,7 +315,7 @@ func publishes{PascalKind}IntegrationEvent() async {
 }
 ```
 
-If a `SpyIntegrationEventChannel` doesn't exist in `Tests/Support/`, create it:
+If a `SpyIntegrationEventChannel` doesn't exist in `Tests/{APP_NAME}Tests/Support/`, create it:
 
 ```swift
 actor SpyIntegrationEventChannel: IntegrationEventChannel {

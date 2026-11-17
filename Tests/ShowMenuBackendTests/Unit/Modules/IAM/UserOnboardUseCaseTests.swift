@@ -12,22 +12,22 @@ struct UserOnboardUseCaseTests {
     }
 
     private func makeSUT() -> (
-        ds: InMemoryDataSource<UserModel>,
-        collector: InMemoryDomainEventCollector,
+        ds: SpyDataSource<UserModel>,
+        collector: InProcessDomainEventCollector,
         context: StubUnitOfWorkContext
     ) {
-        let ds = InMemoryDataSource<UserModel>(id: { $0.id })
-        let collector = InMemoryDomainEventCollector()
+        let ds = SpyDataSource<UserModel>(id: { $0.id })
+        let collector = InProcessDomainEventCollector()
         let ctx = StubUnitOfWorkContext(transaction: "stub", collector: collector)
         return (ds, collector, ctx)
     }
 
     private func makeRepoFactory(
-        ds: InMemoryDataSource<UserModel>
+        ds: SpyDataSource<UserModel>
     ) -> RepositoryFactory<any UserRepository> {
         let mapper = self.mapper
         return { ctx in
-            FirestoreUserRepository(
+            DefaultUserRepository(
                 mapper: mapper,
                 dataSourceFactory: { _, _ in ds },
                 context: ctx
@@ -47,19 +47,14 @@ struct UserOnboardUseCaseTests {
         try await useCase.execute(params: .init(
             userId: User.Id(rawValue: "u-1"),
             email: "alice@example.com",
-            name: "Alice",
-            avatarURL: "https://example.com/a.png"
+            displayName: "Alice"
         ))
 
         let inserted = await ds.insertedModels
         #expect(inserted.count == 1)
         #expect(inserted.first?.id == "u-1")
         #expect(inserted.first?.email == "alice@example.com")
-        #expect(inserted.first?.name == "Alice")
-        #expect(inserted.first?.avatarURL == "https://example.com/a.png")
-        #expect(inserted.first?.accounts == [])
-        #expect(inserted.first?.createdAt != nil)
-        #expect(inserted.first?.updatedAt == inserted.first?.createdAt)
+        #expect(inserted.first?.displayName == "Alice")
 
         let events = await collector.drain()
         #expect(events.count == 1)
@@ -82,8 +77,7 @@ struct UserOnboardUseCaseTests {
         try await useCase.execute(params: .init(
             userId: User.Id(rawValue: "u-existing"),
             email: "different@example.com",
-            name: "Different",
-            avatarURL: nil
+            displayName: "Different"
         ))
 
         let inserted = await ds.insertedModels
@@ -106,8 +100,7 @@ struct UserOnboardUseCaseTests {
             try await useCase.execute(params: .init(
                 userId: User.Id(rawValue: ""),
                 email: nil,
-                name: nil,
-                avatarURL: nil
+                displayName: nil
             ))
         }
     }

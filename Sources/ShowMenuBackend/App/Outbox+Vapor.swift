@@ -31,9 +31,9 @@ extension Application {
     ///   required for the relay alone. A driver is only needed if you also
     ///   `dispatch` queue jobs elsewhere.
     /// - `.minutely()` is the finest stock cadence. For lower-latency delivery,
-    ///   drive `deps.outboxRelay.drain()` from a tighter source (e.g. Cloud
-    ///   Scheduler hitting an endpoint, or a Firestore Cloud Function trigger on
-    ///   outbox-document creation).
+    ///   drive `deps.outboxRelay.drain()` from a tighter source (e.g. an external
+    ///   scheduler hitting an endpoint, or a store-level trigger that fires on
+    ///   outbox-row creation).
     func startOutboxRelay() throws {
         queues.schedule(OutboxRelayJob(relay: deps.outboxRelay))
             .minutely()
