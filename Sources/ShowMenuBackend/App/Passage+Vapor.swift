@@ -19,7 +19,7 @@ import Vapor
 /// `/auth/*` routes — while the IAM module is the system of record for the business-side
 /// `User` aggregate and every authorization decision. The two meet at exactly two seams:
 /// `IAMProvisioningHooks` (Passage account lifecycle → IAM integration events) and
-/// `PassagePrincipalMiddleware` (Passage bearer token → `RequestContext.principal`).
+/// `ContractPrincipalMiddleware` (Passage bearer token → `RequestContext.principal`, via `PassagePrincipalResolver`).
 ///
 /// **Removing authentication** is a code change, not a switch — a project built from
 /// this template that does not need it deletes the Passage pieces:

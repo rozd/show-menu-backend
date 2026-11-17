@@ -1,5 +1,6 @@
 import Vapor
 
 func routes(_ app: Application) throws {
-    // HTTP routes come from the OpenAPI contract (next commit); Passage mounts /auth/* itself.
+    // HTTP routes come only from the OpenAPI contract; Passage mounts /auth/* (and /me) itself.
+    try app.registerContractHandlers()
 }

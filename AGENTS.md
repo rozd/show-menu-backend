@@ -47,6 +47,8 @@ docker compose up app
 Generated route (contract) → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Store
 ```
 
+In front of the generated route, on the `/api` group: `TraceMiddleware` → `HTTPErrorMiddleware` (error envelope) → `IdempotencyKeyMiddleware` → `OptionalPassageBearerAuthenticator` → `ContractPrincipalMiddleware`, then the OpenAPI middlewares `IgnoreAcceptHeaderMiddleware` → `EmptyRequestBodyMiddleware` → `ContractAccessMiddleware` (per-operation access: public / authenticated / admin). Contract operations not implemented yet answer `501 not_implemented` (`App/ContractAPI+NotImplemented.swift`).
+
 **Reads (Queries)** skip UnitOfWork: `Controller → QueryHandler → DataSource → Store`
 **Writes (Commands)** go through UnitOfWork: `Controller → CommandHandler → UnitOfWork.execute { UseCase → Repository }` — domain events are collected during execution and dispatched after commit.
 
@@ -63,7 +65,7 @@ Each business module in `Modules/` follows this layering:
 - **Domain** — `Entity/` (AggregateRoot), `Event/`, `Error/`, `Repository/` protocol, `Operation/` (cross-aggregate logic, see below), `Specification/` (actor-free domain-state rules). Pure business logic, no infrastructure imports.
 - **Application** — `Command/` + `Query/` (CQRS), `UseCase/`, `DTO/`, `Mapper/`, `DataSource/` protocol, `Authorization/` (principal-aware `*Ability` + `Voter/`). Orchestration layer.
 - **Infrastructure** — `Model/` (store `Codable` models), `DataSource/` impl, `Repository/` impl. The only store-specific layer.
-- **Presentation** — controllers and contract witnesses. HTTP routes are generated from the OpenAPI contract in `show-menu-contracts` (contract-first, no hand-written routes; see `docs/conventions/WireContract.md`).
+- **Presentation** — controllers and contract witnesses. HTTP routes are generated from the OpenAPI contract in `show-menu-contracts` (contract-first, no hand-written routes; the only other routes are Passage's own `/auth/*` and `/me`; see `docs/conventions/WireContract.md`).
 
 ### Key Patterns
 
@@ -129,9 +131,9 @@ FluentKit's INSERT/UPDATE touch only declared fields, so `password_hash` is stru
 
 **Integration seams:**
 - `IAMProvisioningHooks` — Passage account registration publishes `UserCreatedIntegrationEvent`, triggering IAM onboarding (idempotent; the row already exists via `PassageUserRecord.passageMakeUser`).
-- `PassagePrincipalMiddleware` — bearer token → `RequestContext.principal` for downstream `Ability`/`Voter` checks. Resolves `User` through IAM's query handler on every request, so role changes take effect immediately.
+- `ContractPrincipalMiddleware` (+ `PassagePrincipalResolver`) — bearer token → `RequestContext.principal` for downstream `Ability`/`Voter` checks. Resolves `User` through IAM's query handler on every request, so role changes take effect immediately. Never rejects; `ContractAccessMiddleware` decides per operation.
 
-**Wiring:** `configurePassage` mounts `/auth/*` and `/me` itself; `PassageBearerAuthenticator` + `PassageGuard` + `PassagePrincipalMiddleware` guard the contract-served routes (wired with the contract). See `App/Passage+Vapor.swift` for configuration (env: `APP_ORIGIN`, `JWKS`/`JWKS_FILE_PATH`; ephemeral dev key if neither is set).
+**Wiring:** `configurePassage` mounts `/auth/*` and `/me` itself; the contract routes use `OptionalPassageBearerAuthenticator` (Passage's `PassageBearerAuthenticator` throws on a garbage token, so failures are swallowed) + `ContractPrincipalMiddleware`, and `ContractAccessMiddleware` enforces the access table (no `PassageGuard`). See `App/Passage+Vapor.swift` for configuration (env: `APP_ORIGIN`, `JWKS`/`JWKS_FILE_PATH`; ephemeral dev key if neither is set).
 
 **Removing authentication:** delete `configurePassage` call + middleware group + `Integration/Passage/` + `Modules/IAM/IAM+Passage.swift`, and add an alternative principal middleware before PEPs run.
 
@@ -239,10 +241,12 @@ Everything store- or framework-specific lives here. `Lib/` never imports from it
   - `PassageUserRecord` — Fluent model conforming to `PassageUserModel`, the second lens on the shared `users` table. Exposes Passage-owned columns only; declares no IAM-owned fields.
   - `Migration/AddUserAuthColumns.swift` — migration adding Passage's credential column (`password_hash`) to the shared `users` table; the identity columns (`phone`, `username`, `phone_verified`) live in IAM's `CreateUsers`.
   - `PassagePrincipal` — security identity carrying authenticated Passage user's id and IAM-resolved roles.
-  - `PassagePrincipalMiddleware` — binds bearer token → `RequestContext.principal` for the request scope, resolving roles through IAM's `User` query handler.
+  - `PassagePrincipalResolver` — Passage user → `PassagePrincipal`, resolving roles through IAM's `User` query handler.
+  - `ContractPrincipalMiddleware` / `OptionalPassageBearerAuthenticator` — the lenient (never-rejecting) bearer + principal binding for contract routes.
   - Wired by `configurePassage(_:)` in `configure(_:)`, which registers Passage migrations onto `DatabaseID.app` and configures the Passage framework (see env: `APP_ORIGIN`, `JWKS`/`JWKS_FILE_PATH`).
 - **Vapor/** — framework glue, independent of the store:
   - `TraceMiddleware` — reads `X-Request-ID` (falling back to `X-Correlation-ID`) or generates one, and populates `RequestContext.traceId` so every log line and downstream command/event correlates to one request. Installed at the very beginning of the middleware chain in `entrypoint.swift`.
+  - `ContractAccessMiddleware` — the operationID → `Access` table (public / authenticated / admin; fails closed); `IgnoreAcceptHeaderMiddleware`, `EmptyRequestBodyMiddleware`; `HTTPErrorMiddleware` (`useErrorEnvelope()`, `HTTPErrorMapping`, `NotImplementedError`).
   - `ETag+Vapor` — the optional ETag/If-Match edge layer (`Version.etag`, `Request.ifMatch`, `Response.setETag`).
   - `IdempotencyKey+Request` — `IdempotencyKeyMiddleware`, lifting the `Idempotency-Key` header into `RequestContext`.
   - `OutboxRelayJob` — the `AsyncScheduledJob` that drains the transactional outbox; scheduled by `App/Outbox+Vapor.swift`.

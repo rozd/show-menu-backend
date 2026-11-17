@@ -10,13 +10,23 @@ public func configure(_ app: Application) async throws {
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 
 
-    // Configuration Point: CORS: uncomment to set
-    // let cors = CORSMiddleware(configuration: .init(
-    //     allowedOrigin: .all,
-    //     allowedMethods: [.GET, .POST, .PUT, .DELETE, .PATCH, .OPTIONS],
-    //     allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith]
-    // ))
-    // app.middleware.use(cors, at: .beginning)
+    // CORS: opt-in. Browser clients on other origins (the dashboard, the showcase) need it;
+    // with CORS_ALLOWED_ORIGINS unset (or empty) no CORS middleware is installed at all.
+    // Comma-separated list of origins, e.g. "https://dash.example.com,https://menu.example.com".
+    // Added at `.beginning` so error responses carry CORS headers too (`useErrorEnvelope`
+    // keeps it outside the error middleware).
+    let corsOrigins = (Environment.get("CORS_ALLOWED_ORIGINS") ?? "")
+        .split(separator: ",")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    if !corsOrigins.isEmpty {
+        let cors = CORSMiddleware(configuration: .init(
+            allowedOrigin: .any(corsOrigins),
+            allowedMethods: [.GET, .POST, .PUT, .DELETE, .PATCH, .OPTIONS],
+            allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith, "Idempotency-Key", "If-Match"]
+        ))
+        app.middleware.use(cors, at: .beginning)
+    }
 
     // Lift the Idempotency-Key header into RequestContext for the command
     // pipeline's IdempotentCommandHandler. Registered globally; a no-op for
@@ -28,6 +38,10 @@ public func configure(_ app: Application) async throws {
     // rejected with `400 Bad Request`. That is intentional (a malformed header is
     // a client error regardless of method); read endpoints are not exempt.
     app.middleware.use(IdempotencyKeyMiddleware())
+
+    // Render every failure as the contract's error envelope. Replaces Vapor's default
+    // ErrorMiddleware (so there is exactly one) and sits right after the trace middleware.
+    app.useErrorEnvelope()
 
     // Persistence. Aggregate storage is always a SQL database (see
     // `App/Store.swift`); the driver follows the environment — Postgres when

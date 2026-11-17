@@ -26,6 +26,15 @@ let package = Package(
         .package(url: "https://github.com/vapor-community/passage.git", from: "0.5.12"),
         // 🎫 Fluent-backed Passage store in overlay mode: shares the app's `users` table.
         .package(url: "https://github.com/rozd/passage-fluent.git", from: "0.1.0"),
+        // 📜 The wire contract: OpenAPI spec + generated Swift types (`APIProtocol`).
+        // Pinned by tag (`from:` resolves to a tagged release). The repo is private:
+        // locally it resolves with the developer's git credentials; CI and Docker
+        // resolve it with a read-only token (see docs/conventions/WireContract.md).
+        .package(url: "https://github.com/rozd/show-menu-contracts.git", from: "0.6.0"),
+        // 🔌 Vapor transport for swift-openapi (registers the generated routes).
+        .package(url: "https://github.com/swift-server/swift-openapi-vapor.git", from: "1.1.0"),
+        // Runtime types shared by the generated code (HTTPBody, ServerMiddleware, ...).
+        .package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.12.0"),
     ],
     targets: [
         .target(
@@ -41,6 +50,9 @@ let package = Package(
                 .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
                 .product(name: "Passage", package: "passage"),
                 .product(name: "PassageFluent", package: "passage-fluent"),
+                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
+                .product(name: "OpenAPIVapor", package: "swift-openapi-vapor"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             // Documentation-only files living next to sources. SwiftPM has no glob
             // for `exclude`, so add new README paths here when introducing them.
@@ -67,6 +79,8 @@ let package = Package(
             dependencies: [
                 .target(name: "ShowMenuBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
+                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             swiftSettings: swiftSettings
         ),
