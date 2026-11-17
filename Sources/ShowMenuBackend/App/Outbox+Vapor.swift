@@ -13,7 +13,7 @@ extension Application {
     /// Register and start the transactional-outbox relay as a Vapor Queues
     /// scheduled job.
     ///
-    /// **Opt-in**, like the other queue building blocks in this template (it is
+    /// **Opt-in**, like the other queue building blocks in this app (it is
     /// intentionally *not* called from `configure`). Add this to `configure(_:)`
     /// once a module actually records integration events through
     /// `context.outbox`:

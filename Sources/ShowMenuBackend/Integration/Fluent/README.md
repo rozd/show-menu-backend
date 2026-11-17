@@ -2,7 +2,7 @@
 
 **The** persistence adapter: [Fluent](https://docs.vapor.codes/fluent/overview/)
 over SQL, implementing every persistence port `Lib/` declares. Aggregate storage in
-this template is always a SQL database — see *Why SQL only* below.
+this app is always a SQL database — see *Why SQL only* below.
 
 `configureFluentStore(app)` (called from `configure(_:)`) picks the driver from the
 environment: **Postgres** when `DATABASE_URL` or `DATABASE_HOST` is set, an

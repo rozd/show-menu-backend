@@ -41,7 +41,10 @@ services:
     ports:
       - '8080:8080'
     # user: '0' # uncomment to run as root for testing purposes even though Dockerfile defines 'vapor' user.
-    command: ["serve", "--env", "production", "--hostname", "0.0.0.0"]
+    # Local testing runs in the development environment: the production
+    # environment refuses to boot without DATABASE_URL and JWKS/JWKS_FILE_PATH
+    # (no in-memory SQLite, no ephemeral signing key).
+    command: ["serve", "--env", "development", "--hostname", "0.0.0.0", "--port", "8080"]
 
   # A local Postgres for projects that swapped configureFluentStore(app) into
   # configure.swift. Started only with the `postgres` profile, so plain

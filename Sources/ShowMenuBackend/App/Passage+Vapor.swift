@@ -11,29 +11,21 @@ import Passage
 import PassageFluent
 import Vapor
 
-/// Configures Passage — the template's authentication layer, in overlay mode over
-/// the app's shared `users` table.
+/// Configures Passage — authentication, in overlay mode over the app's shared
+/// `users` table.
 ///
 /// **Architecture**: Passage and IAM are two Fluent lenses over a single `users` table
 /// (overlay mode S1). Passage owns **authentication** — credentials, tokens, the
-/// `/auth/*` routes — while the IAM module is the system of record for the business-side
-/// `User` aggregate and every authorization decision. The two meet at exactly two seams:
-/// `IAMProvisioningHooks` (Passage account lifecycle → IAM integration events) and
-/// `ContractPrincipalMiddleware` (Passage bearer token → `RequestContext.principal`, via `PassagePrincipalResolver`).
+/// `/auth/*` and `/me` routes, which it mounts itself — while the IAM module is the
+/// system of record for the business-side `User` aggregate and every authorization
+/// decision. The two meet at exactly two seams: `IAMProvisioningHooks` (Passage account
+/// lifecycle → IAM integration events) and `ContractPrincipalMiddleware` (Passage bearer
+/// token → `RequestContext.principal`, via `PassagePrincipalResolver`).
 ///
-/// **Removing authentication** is a code change, not a switch — a project built from
-/// this template that does not need it deletes the Passage pieces:
-/// 1. the `configurePassage` call in `configure.swift`;
-/// 2. the middleware group in `routes.swift` (register the `/v1` collections on `app`
-///    directly, and remove `import Passage`);
-/// 3. this file, `Integration/Passage/`, `Modules/IAM/IAM+Passage.swift`;
-/// 4. the `passage`, `passage-fluent` dependencies in `Package.swift`;
-/// 5. `PassageAuthFlowTests` and `IAMProvisioningHooksTests`;
-/// 6. the `AddUserAuthColumns` migration (or drop the columns `password_hash`, `phone`,
-///    `username`, `phone_verified` by hand).
-///
-/// `RequestContext.principal` is then never populated and the PEPs fail closed, so wire
-/// an alternative principal middleware before exercising protected flows.
+/// **Contract routes**: they get the principal through
+/// `OptionalPassageBearerAuthenticator` + `ContractPrincipalMiddleware` on the `/api`
+/// group (see `routes.swift`); whether a given operation requires it is decided by
+/// `ContractAccessMiddleware`, not by Passage.
 ///
 /// **Store binding**: Overlay mode S1 injects `PassageUserRecord` (a Fluent model
 /// conforming to `PassageUserModel`) into `PassageFluent.DatabaseStore`. Passage
@@ -46,8 +38,8 @@ import Vapor
 /// table, so the old `passageDatabase` dependency is never restored.
 ///
 /// Called from `configure(_:)` after `configureFluentStore` (which creates the `users`
-/// table) and `configureIntegrationEvents`, and before `routes(_:)` (whose middleware
-/// group assumes Passage is configured).
+/// table) and `configureIntegrationEvents`, and before `routes(_:)` (whose `/api`
+/// middleware group assumes Passage is configured).
 ///
 /// Environment:
 ///
@@ -59,7 +51,9 @@ import Vapor
 ///
 /// With neither `JWKS` nor `JWKS_FILE_PATH` set, an **ephemeral** ES256 dev key is
 /// generated at boot — every issued access token becomes invalid on restart, which is
-/// fine for local development and wrong for anything else.
+/// fine for local development and wrong for anything else. In the **production**
+/// environment that case is a startup error
+/// (``PassageConfigurationError/missingSigningKeys``).
 func configurePassage(_ app: Application) async throws {
     // S1 overlay: inject PassageUserRecord and skip automatic migration registration
     // so we can manually register all migrations to `.app` (the shared database).
@@ -89,7 +83,7 @@ func configurePassage(_ app: Application) async throws {
             origin: appOrigin(app),
             routes: .init(group: "auth"),
             tokens: .init(issuer: "show-menu-backend"),
-            jwt: passageJWT(app)
+            jwt: resolvePassageJWT(logger: app.logger, environment: app.environment)
         ),
         hooks: .init(
             account: IAMProvisioningHooks(channel: app.deps.integrationEventChannel)
@@ -115,10 +109,19 @@ enum PassageConfigurationError: Error, CustomStringConvertible {
     /// `APP_ORIGIN` was set but is not a parseable URL.
     case invalidOrigin(String)
 
+    /// Production boot with neither `JWKS` nor `JWKS_FILE_PATH`.
+    case missingSigningKeys
+
     var description: String {
         switch self {
         case let .invalidOrigin(value):
             #"APP_ORIGIN "\#(value)" is not a valid URL."#
+        case .missingSigningKeys:
+            """
+            Running in the production environment without token-signing keys: neither JWKS nor \
+            JWKS_FILE_PATH is set. An ephemeral key would invalidate every access token on restart \
+            and is refused in production — provide a JWKS.
+            """
         }
     }
 }
@@ -137,14 +140,23 @@ private func appOrigin(_ app: Application) throws -> URL {
 
 // MARK: - Token-Signing Keys
 
-private func passageJWT(_ app: Application) throws -> Passage.Configuration.JWT {
-    if Environment.get("JWKS")?.isEmpty == false {
+/// Chooses the token-signing keys. `values` is injectable for tests; the keys
+/// themselves are still loaded by Passage from the process environment.
+func resolvePassageJWT(
+    values: [String: String] = ProcessInfo.processInfo.environment,
+    logger: Logger,
+    environment: Vapor.Environment
+) throws -> Passage.Configuration.JWT {
+    if values["JWKS"]?.isEmpty == false {
         return .init(jwks: try .environment())
     }
-    if Environment.get("JWKS_FILE_PATH")?.isEmpty == false {
+    if values["JWKS_FILE_PATH"]?.isEmpty == false {
         return .init(jwks: try .fileFromEnvironment())
     }
-    app.logger.warning("Auth: no JWKS or JWKS_FILE_PATH set — using an ephemeral dev signing key; all access tokens become invalid on restart")
+    if environment == .production {
+        throw PassageConfigurationError.missingSigningKeys
+    }
+    logger.warning("Auth: no JWKS or JWKS_FILE_PATH set — using an ephemeral dev signing key; all access tokens become invalid on restart")
     return .init(jwks: .init(json: ephemeralJWKS()))
 }
 

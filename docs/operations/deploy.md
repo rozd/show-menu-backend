@@ -50,6 +50,9 @@ Store the URL in Secret Manager and mount it on the service with `--update-secre
 keys (`JWKS` or `JWKS_FILE_PATH`) the same way. `cloudbuild.yaml` does not wire either yet (see the TODO there), so wire
 them before the first Postgres deploy.
 
+The app enforces this: with `--env production` (the Dockerfile default) it fails at boot if neither `DATABASE_URL` /
+`DATABASE_HOST` nor `JWKS` / `JWKS_FILE_PATH` is set, instead of falling back to SQLite or an ephemeral key.
+
 ## Runtime configuration
 | Variable | Source |
 |---|---|

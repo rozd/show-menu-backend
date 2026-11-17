@@ -6,10 +6,6 @@ public func configure(_ app: Application) async throws {
         app.http.server.configuration.port = port
     }
 
-    // uncomment to serve files from /Public folder
-    // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
-
-
     // CORS: opt-in. Browser clients on other origins (the dashboard, the showcase) need it;
     // with CORS_ALLOWED_ORIGINS unset (or empty) no CORS middleware is installed at all.
     // Comma-separated list of origins, e.g. "https://dash.example.com,https://menu.example.com".
@@ -70,7 +66,7 @@ public func configure(_ app: Application) async throws {
 func configureIntegrationEvents(_ app: Application) async {
     // IAM: register the user-lifecycle integration events + their handlers.
     //
-    // In this template both sides live in one process, so publishing an event
+    // Here both sides live in one process, so publishing an event
     // dispatches it straight to the handler below. In a real deployment the
     // producer and consumer are separate services and the events travel over a
     // message bus — that is what the transactional outbox and its relay

@@ -3,7 +3,7 @@ import Foundation
 /// Integration event announcing that a user account came into existence.
 ///
 /// Consumed by `UserCreatedIntegrationEventHandler`, which onboards the local
-/// `User` record. In this template the event originates **in-process** (publish
+/// `User` record. In this app the event originates **in-process** (publish
 /// it wherever accounts are provisioned) and the dispatcher hands it straight to
 /// that handler. In a real deployment the producer would be a separate service —
 /// an identity provider's webhook, say — and the event would arrive over a

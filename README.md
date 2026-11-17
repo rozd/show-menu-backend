@@ -166,6 +166,8 @@ Or with Compose:
 docker compose up app
 ```
 
+The Compose `app` service runs `serve --env development`, so it boots with no configuration (in-memory SQLite, ephemeral signing key). The image's own default, `serve --env production`, refuses to start without `DATABASE_URL` and `JWKS`/`JWKS_FILE_PATH` — so the plain `docker run` above needs them too.
+
 That image runs anywhere that takes a container — a VM, Kubernetes, a managed container service, a Raspberry Pi.
 
 > **Before you deploy anything real:** set `DATABASE_URL` (and the Passage signing keys, `JWKS`; the Cloud Build wiring for both is still a TODO in `cloudbuild.yaml`). On the default in-memory SQLite database every restart wipes the data and every additional replica sees a different dataset, so a rolling deploy or an autoscaler is enough to lose writes. See **Running on Postgres**.
