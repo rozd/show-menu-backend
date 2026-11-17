@@ -78,6 +78,12 @@ extension Application {
         var deleteUserAccountCommandHandler: DeleteUserAccountCommandHandler { get }
         var userCreatedIntegrationEventHandler: UserCreatedIntegrationEventHandler { get }
         var userDeletedIntegrationEventHandler: UserDeletedIntegrationEventHandler { get }
+
+        // MARK: Billing
+
+        /// The payment-provider port (LiqPay live / fake / unconfigured, chosen from the
+        /// environment). Resolved lazily: the app boots with no `LIQPAY_*` variables.
+        var paymentGateway: any PaymentGateway { get }
     }
 
     // MARK: - CompositionRoot
