@@ -10,9 +10,11 @@ import Foundation
 /// Retries a transient-failure-prone async operation: bounded attempts, capped
 /// exponential backoff, and a caller-supplied `shouldRetry` predicate.
 ///
-/// Compose the predicate with transport error taxonomies (e.g.
-/// `FirestoreError.isRetryable` — see `RetryPolicy.firestore` in
-/// `Integration/Firestore/`). Cancellation is honored: a thrown
+/// Compose the predicate with transport error taxonomies — e.g. an HTTP client's
+/// `isTransient`, or a store's retryable-error flag. Such presets are bindings, not
+/// `Lib` code: define them as a `RetryPolicy` extension in `Integration/<Store>/`
+/// (what counts as a transient failure is the project's call, so none ships).
+/// Cancellation is honored: a thrown
 /// `CancellationError` is never retried, and cancelling the surrounding task
 /// during an inter-attempt sleep stops the loop.
 ///
@@ -43,7 +45,7 @@ struct RetryPolicy: Sendable {
             Backoff(initial: initial, multiplier: multiplier, cap: cap)
         }
 
-        /// No waiting between attempts (tests, in-memory work).
+        /// No waiting between attempts (tests, in-process work).
         static let immediate = Backoff(initial: 0, multiplier: 1, cap: 0)
 
         /// Backoff before the next attempt, given `attempt` failures so far (>= 1).

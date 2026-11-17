@@ -1,4 +1,4 @@
-// swift-tools-version:6.2
+// swift-tools-version:6.3
 import PackageDescription
 
 let package = Package(
@@ -13,29 +13,19 @@ let package = Package(
         .package(url: "https://github.com/vapor/queues.git", from: "1.17.2"),
         // 🔵 Non-blocking, event-driven networking for Swift. Used for custom executors
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
-        // 🔐 Cross-platform cryptography for JWT signing (works on macOS and Linux)
+        // 🔐 Cross-platform cryptography (SHA-256 request fingerprints; macOS and Linux)
         .package(url: "https://github.com/apple/swift-crypto.git", from: "4.2.0"),
-        // 🔑 JWT verification for Firebase ID tokens (JWKS, RS256)
-        .package(url: "https://github.com/vapor/jwt.git", from: "5.1.0"),
-        // 🔥 Firebase API - gRPC-based Firestore client
-        //    Pinned to a revision (was `branch: main`); bump deliberately.
-        .package(url: "https://github.com/Rsych/FirebaseAPI.git", revision: "c5fe828790f7d7bf443dda42bbcba3fc3fe72a6a"),
-        // 📡 gRPC Swift NIO Transport - HTTP/2 transport for FirebaseAPI
-        .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", from: "2.0.0"),
-        // 🔑 Google Auth - Application Default Credentials and OAuth2 access tokens for GCP APIs
-        .package(url: "https://github.com/googleapis/swift-google-auth", from: "0.6.0"),
-        // 💳 LiqPay client (signing, status, webhook decoding). Manifest is swift-tools 6.3.
-        //    Pinned to a revision; bump deliberately.
-        .package(url: "https://github.com/summerhammer/liqpay-client.git", revision: "fcfdf522d121b5c12783a2745803ce9cecc82ddd"),
-        // 📜 The OpenAPI wire contract (generated types + server stubs) — single source of truth for the
-        // HTTP API. Pinned to a **tag**, never a branch: a contract change is a PR in show-menu-contracts
-        // first, then a bump here (see docs/conventions/WireContract.md). Private repo — CI and Docker
-        // resolve it with a read-only token.
-        .package(url: "https://github.com/rozd/show-menu-contracts.git", from: "0.2.0"),
-        // 🧩 Vapor transport for swift-openapi-runtime (`registerHandlers(on: VaporTransport(...))`)
-        .package(url: "https://github.com/swift-server/swift-openapi-vapor.git", from: "1.1.0"),
-        // ⚙️ Runtime library for the generated server code
-        .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.12.0"),
+        // 🗄 Fluent: database toolkit — connection pooling, migrations, transactions.
+        .package(url: "https://github.com/vapor/fluent.git", from: "4.13.0"),
+        // 🐘 The Postgres driver behind the Fluent store adapter (Integration/Fluent).
+        .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.12.0"),
+        // 🪶 SQLite driver: backs the app's own store when nothing is configured
+        // (the zero-infrastructure default — see App/Fluent+Vapor.swift).
+        .package(url: "https://github.com/vapor/fluent-sqlite-driver.git", from: "4.9.0"),
+        // 🎫 Passage: authentication (registration, login, tokens) — see App/Passage+Vapor.swift.
+        .package(url: "https://github.com/vapor-community/passage.git", from: "0.5.12"),
+        // 🎫 Fluent-backed Passage store in overlay mode: shares the app's `users` table.
+        .package(url: "https://github.com/rozd/passage-fluent.git", from: "0.1.0"),
     ],
     targets: [
         .target(
@@ -43,19 +33,14 @@ let package = Package(
             dependencies: [
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "Queues", package: "queues"),
-                .product(name: "JWT", package: "jwt"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
-                .product(name: "CryptoExtras", package: "swift-crypto"),
-                .product(name: "FirestoreAPI", package: "FirebaseAPI"),
-                .product(name: "GRPCNIOTransportHTTP2", package: "grpc-swift-nio-transport"),
-                .product(name: "GoogleAuth", package: "swift-google-auth"),
-                .product(name: "LiqPayClient", package: "liqpay-client"),
-                .product(name: "LiqPayClientVapor", package: "liqpay-client"),
-                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
-                .product(name: "OpenAPIVapor", package: "swift-openapi-vapor"),
-                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                .product(name: "Fluent", package: "fluent"),
+                .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
+                .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
+                .product(name: "Passage", package: "passage"),
+                .product(name: "PassageFluent", package: "passage-fluent"),
             ],
             // Documentation-only files living next to sources. SwiftPM has no glob
             // for `exclude`, so add new README paths here when introducing them.
@@ -66,6 +51,7 @@ let package = Package(
                 "Lib/DDD/README.md",
                 "Lib/FSM/README.md",
                 "Lib/Utils/README.md",
+                "Integration/Fluent/README.md",
             ],
             swiftSettings: swiftSettings
         ),
@@ -81,10 +67,6 @@ let package = Package(
             dependencies: [
                 .target(name: "ShowMenuBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
-                .product(name: "GoogleAuth", package: "swift-google-auth"),
-                .product(name: "LiqPayClient", package: "liqpay-client"),
-                .product(name: "ShowMenuContracts", package: "show-menu-contracts"),
-                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             swiftSettings: swiftSettings
         ),

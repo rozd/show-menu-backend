@@ -13,9 +13,9 @@ import Logging
 /// Abstraction for publishing integration events to a transport layer.
 ///
 /// Implementations may use:
-/// - In-memory dispatch (testing, local development)
+/// - In-process dispatch (testing, local development)
 /// - Vapor Queues (Redis-backed, development/staging)
-/// - Cloud Pub/Sub (production)
+/// - A managed pub/sub bus or message broker (production)
 /// - HTTP webhooks (external systems)
 ///
 /// The channel handles serialization internally using `IntegrationEventCoder`.
@@ -32,10 +32,16 @@ protocol IntegrationEventChannel: Sendable {
 
 // MARK: - In-Memory Implementation
 
-/// In-memory channel for testing and local development.
+/// In-process channel: publishing hands the event straight to the dispatcher,
+/// with no transport in between. The shipped default, and what makes the
+/// template's single-process deployment work; a real deployment swaps in a
+/// broker-backed channel (see `VaporQueueIntegrationEventChannel`).
+///
+/// "InProcess", not "InMemory": this is about *where dispatch happens*, not
+/// about persistence — it is unrelated to which database the app runs on.
 ///
 /// Dispatches events directly to registered handlers without serialization.
-actor InMemoryIntegrationEventChannel: IntegrationEventChannel {
+actor InProcessIntegrationEventChannel: IntegrationEventChannel {
     private let dispatcher: any IntegrationEventDispatcher
     private let logger: Logger
 

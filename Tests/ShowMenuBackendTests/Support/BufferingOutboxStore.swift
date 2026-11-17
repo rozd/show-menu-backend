@@ -1,20 +1,19 @@
 import Foundation
 @testable import ShowMenuBackend
 
-/// An ``OutboxStore`` test double that models Firestore's buffered-write
+/// An ``OutboxStore`` test double that models the store's buffered-write
 /// transaction semantics: `append` buffers the row, and it only becomes visible
 /// in the backing `target` store when `commit()` is called — `rollback()`
-/// discards it. This lets `StubUnitOfWork` mirror the real
-/// `FirestoreTransactionUnitOfWork`, where recorded outbox rows commit with the
-/// transaction or vanish on failure.
+/// discards it. This lets `StubUnitOfWork` mirror `FluentUnitOfWork`, where
+/// recorded outbox rows commit with the transaction or vanish on failure.
 ///
 /// Relay-side reads/writes delegate straight to the (committed) `target`.
 actor BufferingOutboxStore: OutboxStore {
 
-    private let target: InMemoryOutboxStore
+    private let target: RecordingOutboxStore
     private var buffer: [OutboxMessage] = []
 
-    init(target: InMemoryOutboxStore) {
+    init(target: RecordingOutboxStore) {
         self.target = target
     }
 

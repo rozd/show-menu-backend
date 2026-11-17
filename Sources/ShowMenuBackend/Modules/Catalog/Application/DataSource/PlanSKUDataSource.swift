@@ -1,2 +1,0 @@
-protocol PlanSKUDataSource: QueryableDataSource<PlanSKUModel> {
-}

@@ -13,7 +13,7 @@ You are adding a new UseCase to an existing module. The optional hint is: **$ARG
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/` to find directory names.
-3. If `$ARGUMENTS` is provided, try to parse a module name or use-case name from it (e.g., `Catalog/ArchiveFeature`, `ArchiveFeature`, `Catalog`).
+3. If `$ARGUMENTS` is provided, try to parse a module name or use-case name from it (e.g., `Items/ArchiveItem`, `ArchiveItem`, `Items`).
 
 ## Step 1 — Ask Questions
 
@@ -21,7 +21,7 @@ Use `AskUserQuestion` to gather the following (combine into one call where possi
 
 ### Question 1: Target Module
 Ask: "Which module should this UseCase be added to?" with options dynamically built from the modules found in pre-flight. Example:
-- **Catalog** — `Modules/Catalog/`
+- **IAM** — `Modules/IAM/`
 - **Orders** — `Modules/Orders/`
 - (etc., one per discovered module)
 
@@ -29,9 +29,9 @@ Skip this question if the module was unambiguously identified from `$ARGUMENTS`.
 
 ### Question 2: Trigger Type
 Ask: "How is this UseCase triggered?" with options:
-- **REST API** — Exposed as an HTTP endpoint (Command + CommandHandler + Controller + contract operation)
+- **REST API** — Exposed as an HTTP endpoint (Command + CommandHandler + Controller route)
 - **Domain Event** — Reacts to an event from within this bounded context (DomainEventHandler)
-- **Integration Event** — Reacts to a cross-context event, e.g., from Eventarc or another module (IntegrationEventHandler)
+- **Integration Event** — Reacts to a cross-context event, e.g., from another module or an external producer (IntegrationEventHandler)
 - **Internal** — Called only by other UseCases or services, no external trigger
 
 ### Question 3: UseCase Action & Behavior
@@ -60,35 +60,35 @@ Before generating code, read the module's existing files to understand its types
 1. Read `Modules/{Module}/Domain/Entity/{Entity}.swift` → get entity name, properties, `{Entity}.Error` cases, validation methods
 2. Read `Modules/{Module}/Domain/Event/{Entity}Event.swift` → get event kind enum name and existing events
 3. Read `Modules/{Module}/Domain/Repository/{Entity}Repository.swift` → get repository protocol name
-4. Read `Modules/{Module}/Infrastructure/Repository/Firestore{Entity}Repository.swift` → understand repo implementation
+4. Read `Modules/{Module}/Infrastructure/Repository/Default{Entity}Repository.swift` → understand repo implementation (glob `Infrastructure/Repository/*.swift` if the type is named differently)
 5. Read `Modules/{Module}/Application/Mapper/{Entity}Mapper.swift` → get mapper name
 6. Read `Modules/{Module}/Application/DTO/{Entity}DTO.swift` → get DTO type
 7. Read `Modules/{Module}/Infrastructure/Model/{Entity}Model.swift` → get model type
-8. If REST API trigger: read `Modules/{Module}/Presentation/Controller/{Entity}Controller.swift` and `Modules/{Module}/Presentation/ContractAPI+{Module}.swift` (confirm the operation already exists in `show-menu-contracts`; see `docs/conventions/WireContract.md`)
+8. If REST API trigger: read `Modules/{Module}/Presentation/Controller/{Entity}Controller.swift` and `Modules/{Module}/Presentation/Route/{Entity}RouteV1.swift`
 
 This gives you all the concrete type names to use in generated code.
 
 ## Step 3 — Derive Names
 
-| Concept | Pattern | Example (Action=Archive, Entity=Feature) |
+| Concept | Pattern | Example (Action=Archive, Entity=Item) |
 |---|---|---|
-| UseCase | `{Action}{Entity}UseCase` | `ArchiveFeatureUseCase` |
-| UseCase Params | `{Action}{Entity}UseCase.Params` | `ArchiveFeatureUseCase.Params` |
-| Command | `{Action}{Entity}Command` | `ArchiveFeatureCommand` |
-| Command Payload | `{Action}{Entity}Command.Payload` | `ArchiveFeatureCommand.Payload` |
-| Command Handler | `{Action}{Entity}CommandHandler` | `ArchiveFeatureCommandHandler` |
-| Domain Event Handler | `{Action}On{Entity}{EventKind}Handler` | `ArchiveOnFeatureCreatedHandler` |
+| UseCase | `{Action}{Entity}UseCase` | `ArchiveItemUseCase` |
+| UseCase Params | `{Action}{Entity}UseCase.Params` | `ArchiveItemUseCase.Params` |
+| Command | `{Action}{Entity}Command` | `ArchiveItemCommand` |
+| Command Payload | `{Action}{Entity}Command.Payload` | `ArchiveItemCommand.Payload` |
+| Command Handler | `{Action}{Entity}CommandHandler` | `ArchiveItemCommandHandler` |
+| Domain Event Handler | `{Action}On{Entity}{EventKind}Handler` | `ArchiveOnItemCreatedHandler` |
 | Integration Event Handler | `{Action}On{IntegrationEvent}Handler` | `ArchiveOnUserDeletedHandler` |
-| Controller method | `{action}{Entity}(_ input:)` | `archiveFeature(_:)` |
-| Test suite | `{Action}{Entity}UseCaseTests` | `ArchiveFeatureUseCaseTests` |
-| Domain event kind | `.{entity}{Action}d` or `.{entity}{Action}ed` | `.featureArchived` |
+| Controller method | `{action}{Entity}(req:)` | `archiveItem(req:)` |
+| Test suite | `{Action}{Entity}UseCaseTests` | `ArchiveItemUseCaseTests` |
+| Domain event kind | `.{entity}{Action}d` or `.{entity}{Action}ed` | `.itemArchived` |
 
 ## Step 4 — Create Files by Trigger Type
 
 **All source files** go under `Sources/{APP_NAME}/Modules/{Module}/`.
 **All test files** go under `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
 
-Read the corresponding reference files from the Catalog module before writing. Follow exact same conventions.
+Read the corresponding reference files from the IAM module before writing. Follow exact same conventions.
 
 ---
 
@@ -124,7 +124,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
 
    - If the UseCase **writes data**: it receives `context: any UnitOfWorkContext` and `repositoryFactory`
    - If the UseCase is **read-only**: it receives `dataSourceFactory: DataSourceFactory<{Entity}Model>` and `mapper` (no context/repository)
-   - Reference: `Modules/Catalog/Application/UseCase/CreateFeatureUseCase.swift`
+   - Reference: `Modules/IAM/Application/UseCase/UserOnboardUseCase.swift`
 
 2. **`Application/Command/{Action}{Entity}Command.swift`**
 
@@ -139,7 +139,7 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
    }
    ```
 
-   - Reference: `Modules/Catalog/Application/Command/CreateFeatureCommand.swift`
+   - Reference: `Modules/IAM/Application/Command/CreateUserAccountCommand.swift`
 
 3. **`Application/Command/Handler/{Action}{Entity}CommandHandler.swift`**
 
@@ -161,35 +161,33 @@ Creates a Command → CommandHandler → UseCase chain exposed as an HTTP endpoi
    }
    ```
 
-   - Reference: `Modules/Catalog/Application/Command/Handler/CreateFeatureCommandHandler.swift`
+   - Reference: `Modules/IAM/Application/Command/Handler/CreateUserAccountCommandHandler.swift`
 
-4. **Contract first (hard rule: no hand-written routes).** The operation must already be defined in `show-menu-contracts/Sources/ShowMenuContracts/openapi.yaml` (PR there, release a tag, bump it in `Package.swift`). If it is not, stop and tell the user the contract PR is needed before the HTTP surface can be added; the UseCase/Command/Handler can still be created. See `docs/conventions/WireContract.md`.
-
-5. **Update `Presentation/Controller/{Entity}Controller.swift`** — Add a new property for the command handler and a method named after the `operationId`, taking the generated `Input` and returning the generated `Output` (no Vapor `Request`):
+4. **Update `Presentation/Controller/{Entity}Controller.swift`** — Add a new property for the command handler and a new endpoint method:
 
    ```swift
    // Add property:
    let {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler
 
    // Add method:
-   func {action}{Entity}(_ input: Operations.{Action}{Entity}.Input) async throws -> Operations.{Action}{Entity}.Output {
-       // Map wire -> command via {Module}WireMapper, call the handler, map DTO -> wire, return .ok(.init(body: .json(...)))
+   @Sendable
+   func {action}{Entity}(req: Request) async throws -> Response {
+       // Decode payload, create command, call handler, return response
    }
    ```
 
-   - Path/query values come from `input.path.*` / `input.query.*`; the body from `input.body` (`guard case let .json(body)`)
-   - Errors are **thrown** (domain errors, `ApplicationError.notFound`, …); `HTTPErrorMapping` renders them (400/404/409/422/503); do not catch them to build responses
-   - Reference: `PlanController` (`Modules/Catalog/Presentation/Controller/PlanController.swift`)
+   - For Update/Delete: extract `{entity}Id` from `req.parameters.get("{entity}Id")`
+   - Error handling: validation errors → 400, not found (`ApplicationError.notFound`) → 404, `ConcurrencyError` → 412 with `If-Match`, else 409; everything else falls through to 500 — mirror the existing mapping in the module's controller
+   - Reference: the contract witness for the operation (`docs/conventions/WireContract.md`)
 
-6. **Update `Presentation/ContractAPI+{Module}.swift`** — add the witness forwarding to the controller, and add the operation's `Operations.X.id` to `ContractAccessMiddleware.table` (an unlisted operation fails closed with 401):
+5. **Update `Presentation/Route/{Entity}RouteV1.swift`** — Add the new route:
 
    ```swift
-   func {action}{Entity}(_ input: Operations.{Action}{Entity}.Input) async throws -> Operations.{Action}{Entity}.Output {
-       try await {Entity}Controller(/* handlers from app.deps */).{action}{Entity}(input)
-   }
+   // For Create-like: {module}.post("subresource", use: controller.{action}{Entity})
+   // For Update: {module}.put(":{entity}Id", use: controller.{action}{Entity})
+   // For Delete: {module}.delete(":{entity}Id", use: controller.{action}{Entity})
+   // For Custom: choose appropriate HTTP method and path
    ```
-
-7. **Add a controller unit test** (`Tests/ShowMenuBackendTests/Unit/Modules/{Module}/{Entity}ControllerTests.swift`): build the controller with `InMemoryDataSource` + `StubUnitOfWork`, call it with a generated `Input`, assert the generated `Output` and thrown errors. Reference: `Tests/ShowMenuBackendTests/Unit/Modules/Catalog/PlanControllerTests.swift`
 
 ---
 
@@ -241,7 +239,7 @@ Creates a DomainEventHandler that reacts to an event from this bounded context, 
    - Reference protocol: `Lib/DDD/Events/DomainEventHandler.swift`
    - If the event kind doesn't exist yet, add it to `{Entity}EventKind` enum in `Domain/Event/{Entity}Event.swift`
 
-3. **Optionally add a new event kind** — If the UseCase records a new event kind (e.g., `.featureArchived`), update `Domain/Event/{Entity}Event.swift` to add the new case to `{Entity}EventKind`.
+3. **Optionally add a new event kind** — If the UseCase records a new event kind (e.g., `.itemArchived`), update `Domain/Event/{Entity}Event.swift` to add the new case to `{Entity}EventKind`.
 
 ---
 
@@ -312,12 +310,14 @@ Creates only the UseCase (no external trigger). Called by other UseCases or serv
 
 Create `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/{Action}{Entity}UseCaseTests.swift`.
 
-Follow the test patterns from `FeatureUseCaseTests.swift`:
+Follow the test patterns from `CreateItemUseCaseTests.swift`:
 
 - Use Swift Testing framework (`@Suite`, `@Test`, `#expect`, `#require`)
 - `@testable import {APP_NAME}`
-- `makeSUT()` returns `(ds: InMemoryDataSource<{Entity}Model>, collector: InMemoryDomainEventCollector, context: StubUnitOfWorkContext)`
-- `makeRepoFactory(ds:)` helper creates `RepositoryFactory` with `InMemoryDataSource`
+- `makeSUT()` returns `(ds: SpyDataSource<{Entity}Model>, collector: InProcessDomainEventCollector, context: StubUnitOfWorkContext)`
+- `makeRepoFactory(ds:)` helper creates `RepositoryFactory` with `SpyDataSource`
+
+> `SpyDataSource` is the **test double** in `Tests/{APP_NAME}Tests/Support/`. Do not confuse it with `FluentDataSource` in `Integration/Fluent/`, which is the real persistence adapter — the doubles are named `Spy*`/`Stub*` precisely to keep the two apart.
 
 ### Test cases to generate (adapt based on the action):
 
@@ -344,17 +344,17 @@ Follow the test patterns from `FeatureUseCaseTests.swift`:
   - Handler receives matching event → delegates to UseCase
   - Handler receives non-matching event kind → ignores (for DomainEventHandler with kind filter)
 
-To seed test data, use `await ds.seed(models:)` on the `InMemoryDataSource`.
+To seed test data, use `await ds.seed(models:)` on the `SpyDataSource`.
 
-Reference: `Tests/{APP_NAME}Tests/Unit/Modules/Catalog/FeatureUseCaseTests.swift`
+Reference: `Tests/{APP_NAME}Tests/Unit/Modules/IAM/UserOnboardUseCaseTests.swift`
 
 ## Step 6 — Summary
 
 After creating all files, output:
 
 1. **Created files** — list with paths
-2. **Modified files** — list files that were edited (Controller, ContractAPI witness, access table, EventKind enum)
-3. **Wiring instructions** — what the user must add to `Vapor+Dependencies.swift` (HTTP routes come from the contract; `routes.swift` is never edited):
+2. **Modified files** — list files that were edited (Controller, Route, EventKind enum)
+3. **Wiring instructions** — what the user must add to `Vapor+Dependencies.swift` and optionally `routes.swift`:
 
 ### For REST API trigger, add to the `Application.Dependencies` protocol:
 ```swift
@@ -388,20 +388,19 @@ var {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler {
 }
 ```
 
-### For REST API trigger, update the HTTP surface (contract first):
-- The operation must exist in `show-menu-contracts` and the tag be bumped in `Package.swift`
-- Pass the new command handler from the `ContractAPI+{Module}.swift` witness to the Controller constructor
-- Add the operation to `ContractAccessMiddleware.table`
+### For REST API trigger, update `routes.swift`:
+- Add the new command handler to the Controller constructor
+- The route was already added by editing `{Entity}RouteV1`
 
 ### For Domain Event trigger, add to Dependencies and register handler:
 ```swift
-// In configure.swift, register the handler with the domain event dispatcher:
+// In CompositionRoot, register the handler with the domain event dispatcher:
 // await domainEventDispatcher.register(handler: {action}On{Entity}{EventKind}Handler(...))
 ```
 
 ### For Integration Event trigger, add to Dependencies and register handler:
 ```swift
-// In configure.swift (configureIntegrationEvents), register the handler with the integration event dispatcher:
+// In CompositionRoot, register the handler with the integration event dispatcher:
 // await integrationEventDispatcher.register(handler: {action}On{IntegrationEvent}Handler(...))
 ```
 
@@ -413,5 +412,5 @@ var {action}{Entity}CommandHandler: {Action}{Entity}CommandHandler {
 - **Imports**: Only import what's needed. Application layer imports `Foundation` and `Logging`.
 - **Logging**: Use structured logging with metadata. Info level for use case execution, debug for operations, error for failures.
 - **Write constraints**: Only write files into `Sources/{APP_NAME}/Modules/{Module}/` and `Tests/{APP_NAME}Tests/Unit/Modules/{Module}/`.
-- **Existing code**: When editing Controller or ContractAPI witness files, preserve all existing code. Only add new properties, methods, and witnesses.
+- **Existing code**: When editing Controller or Route files, preserve all existing code. Only add new properties, methods, and routes.
 - **Generate working code**: Based on the user's answers, generate complete, compilable code — not stubs with TODO comments. Infer reasonable implementations from the action verb and context.

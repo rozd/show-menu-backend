@@ -36,7 +36,8 @@ extension TraceID {
 }
 
 private extension UUID {
-    /// 32-char lowercase hex without hyphens — the format Cloud Trace / W3C traceparent expects.
+    /// 32-char lowercase hex without hyphens — the trace-id format the W3C
+    /// `traceparent` header (and most tracing backends) expect.
     var hexString: String {
         uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }

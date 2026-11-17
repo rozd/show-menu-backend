@@ -12,7 +12,7 @@ import Foundation
 /// **Write side** (`append`) is called *inside* a Unit of Work and MUST enlist in
 /// that work's transaction — the row commits atomically with the state change, or
 /// not at all. A concrete store binds to the active transaction exactly as a
-/// ``Repository`` binds its ``DataSource`` (see `FirestoreOutboxStore`); it must
+/// ``Repository`` binds its ``DataSource`` (see `FluentOutboxStore`); it must
 /// never open its own connection or transaction.
 ///
 /// **Relay side** (`pending` / `markPublished` / `recordFailure` /

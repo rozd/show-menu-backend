@@ -15,7 +15,7 @@ Integration events cross bounded-context boundaries. They use **primitive types 
 
 1. Read `Package.swift` to find the executable target name (`APP_NAME`).
 2. List available modules by globbing `Sources/{APP_NAME}/Modules/*/`.
-3. If `$ARGUMENTS` is provided, try to parse a module name or event name from it (e.g., `Catalog/FeatureArchived`, `UserRegistered`).
+3. If `$ARGUMENTS` is provided, try to parse a module name or event name from it (e.g., `Items/ItemArchived`, `UserRegistered`).
 4. Read `Sources/{APP_NAME}/configure.swift` to understand the current registration setup.
 
 ## Step 1 — Ask Questions
@@ -28,7 +28,7 @@ Skip if unambiguously identified from `$ARGUMENTS`.
 
 ### Question 2: Event Name
 Ask: "What is the event name?" with options:
-- **Specify name** — The user provides a name like `UserRegistered`, `OrderShipped`, `FeatureArchived`
+- **Specify name** — The user provides a name like `UserRegistered`, `OrderShipped`, `ItemArchived`
 
 The name should describe what happened in past tense. It will be suffixed with `IntegrationEvent` automatically (e.g., `UserRegistered` → `UserRegisteredIntegrationEvent`).
 
@@ -57,17 +57,17 @@ Read the module's existing types to understand naming conventions:
 
 ## Step 3 — Derive Names
 
-| Concept | Pattern | Example (Module=Catalog, EventName=FeatureArchived) |
+| Concept | Pattern | Example (Module=Items, EventName=ItemArchived) |
 |---|---|---|
-| Event struct | `{EventName}IntegrationEvent` | `FeatureArchivedIntegrationEvent` |
-| Event kind | `"{module}.{eventName}"` (dotted, lowercased) | `"catalog.featureArchived"` |
-| Event file | `Application/Event/{EventName}IntegrationEvent.swift` | `FeatureArchivedIntegrationEvent.swift` |
-| Handler struct | `{Action}On{EventName}Handler` | `ProcessOnFeatureArchivedHandler` |
-| Handler file | `Application/Event/Handler/Integration/{Action}On{EventName}Handler.swift` | `ProcessOnFeatureArchivedHandler.swift` |
-| Command (if delegating) | `{Action}{Entity}Command` | `ProcessArchivedFeatureCommand` |
-| Command Handler (if delegating) | `{Action}{Entity}CommandHandler` | `ProcessArchivedFeatureCommandHandler` |
-| Test suite | `{EventName}IntegrationEventTests` | `FeatureArchivedIntegrationEventTests` |
-| Handler test suite | `{Action}On{EventName}HandlerTests` | `ProcessOnFeatureArchivedHandlerTests` |
+| Event struct | `{EventName}IntegrationEvent` | `ItemArchivedIntegrationEvent` |
+| Event kind | `"{module}.{eventName}"` (dotted, lowercased) | `"items.itemArchived"` |
+| Event file | `Application/Event/{EventName}IntegrationEvent.swift` | `ItemArchivedIntegrationEvent.swift` |
+| Handler struct | `{Action}On{EventName}Handler` | `ProcessOnItemArchivedHandler` |
+| Handler file | `Application/Event/Handler/Integration/{Action}On{EventName}Handler.swift` | `ProcessOnItemArchivedHandler.swift` |
+| Command (if delegating) | `{Action}{Entity}Command` | `ProcessArchivedItemCommand` |
+| Command Handler (if delegating) | `{Action}{Entity}CommandHandler` | `ProcessArchivedItemCommandHandler` |
+| Test suite | `{EventName}IntegrationEventTests` | `ItemArchivedIntegrationEventTests` |
+| Handler test suite | `{Action}On{EventName}HandlerTests` | `ProcessOnItemArchivedHandlerTests` |
 
 The handler's `{Action}` verb describes what the handler does, not the event. Ask the user what action verb to use if it's not obvious from context.
 
@@ -103,8 +103,8 @@ struct {EventName}IntegrationEvent: IntegrationEvent {
 ```
 
 Key rules for IntegrationEvent types:
-- **Primitive types only** — `String`, `Int`, `Double`, `Bool`, `Date`, `UUID`. No domain types (`Feature.Id`, `FeatureDTO`, etc.) — integration events cross context boundaries.
-- **`kind` is a static string** — use dotted notation: `"{module}.{camelCaseEventName}"` (e.g., `"catalog.featureArchived"`).
+- **Primitive types only** — `String`, `Int`, `Double`, `Bool`, `Date`, `UUID`. No domain types (`Item.Id`, `ItemDTO`, etc.) — integration events cross context boundaries.
+- **`kind` is a static string** — use dotted notation: `"{module}.{camelCaseEventName}"` (e.g., `"items.itemArchived"`).
 - **`metadata` uses `IntegrationEventMetadata`** — carries `origin` (module name), optional `correlationId` (`TraceID?`), and `occurredAt`.
 - **All fields `Codable` and `Sendable`**.
 - Reference protocol: `Lib/DDD/Events/IntegrationEvent.swift`
@@ -345,7 +345,7 @@ struct {Action}On{EventName}HandlerTests {
 ```swift
 @Test("delegates to command handler on event")
 func delegatesToCommand() async throws {
-    let ds = InMemoryDataSource<{Entity}Model>(id: { $0.id })
+    let ds = SpyDataSource<{Entity}Model>(id: { $0.id })
     let spy = SpyDomainEventDispatcher()
     let uow = StubUnitOfWork(dispatcher: spy)
 
@@ -355,7 +355,7 @@ func delegatesToCommand() async throws {
             {Action}{Entity}UseCase(
                 context: ctx,
                 repositoryFactory: { ctx in
-                    Firestore{Entity}Repository(
+                    Default{Entity}Repository(
                         mapper: {Entity}Mapper(),
                         dataSourceFactory: { _, _ in ds },
                         context: ctx
@@ -398,7 +398,7 @@ func preservesCorrelationId() async throws {
 ```swift
 @Test("executes use case on event")
 func executesUseCase() async throws {
-    let ds = InMemoryDataSource<{Entity}Model>(id: { $0.id })
+    let ds = SpyDataSource<{Entity}Model>(id: { $0.id })
     let spy = SpyDomainEventDispatcher()
     let uow = StubUnitOfWork(dispatcher: spy)
 
@@ -408,7 +408,7 @@ func executesUseCase() async throws {
             {Action}{Entity}UseCase(
                 context: ctx,
                 repositoryFactory: { ctx in
-                    Firestore{Entity}Repository(
+                    Default{Entity}Repository(
                         mapper: {Entity}Mapper(),
                         dataSourceFactory: { _, _ in ds },
                         context: ctx
@@ -508,11 +508,24 @@ await integrationEventChannel.publish(
 )
 ```
 
-This can be called from a DomainEventHandler, a Controller, an Eventarc webhook handler, or any other integration point.
+This can be called from a DomainEventHandler, a Controller, a webhook endpoint, or any other integration point.
+
+For delivery that survives a crash, a UseCase should instead record the event into the **transactional outbox** from inside its own transaction, so the row and the state change commit together:
+
+```swift
+try await context.outbox.record(
+    {EventName}IntegrationEvent(
+        {field1}: value,
+        metadata: .from(origin: "{Module}")
+    )
+)
+```
+
+The relay (`OutboxRelayJob`, opt-in via `try app.startOutboxRelay()`) then publishes it through the same `IntegrationEventChannel`. Delivery is at-least-once, which is why handlers must be idempotent.
 
 ## Important Rules
 
-- **Primitive types only in events** — No domain types. Use `String` for IDs, not `Feature.Id`. This ensures events remain decoupled from the originating bounded context.
+- **Primitive types only in events** — No domain types. Use `String` for IDs, not `Item.Id`. This ensures events remain decoupled from the originating bounded context.
 - **Idempotent handlers** — Events may be delivered multiple times (at-least-once semantics). Handlers must be safe to re-execute.
 - **Swift 6.2 strict concurrency** — All types must be `Sendable`. The event struct is `Codable & Sendable` by definition.
 - **No file header comments** — Do not add `// Created by...` or `// Copyright...` headers.

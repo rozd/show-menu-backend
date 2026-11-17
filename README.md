@@ -1,97 +1,132 @@
-# ShowMenuBackend
+# Show Menu Backend
 
-Swift Vapor backend for Show Menu, a digital restaurant menu product (QR menus, with LiqPay subscription payments handled by this backend). Firebase configuration, the local emulator bridge and the black-box contract suite live in the sibling repo `../show-menu-firebase`.
+Swift/Vapor backend for Show Menu (code name): QR menus for customers, an admin dashboard for restaurant owners, and LiqPay subscription payments. Built with **Domain-Driven Design (DDD)** and **CQRS** over a SQL database. Persistence is one adapter — Fluent — with two drivers behind it: **SQLite** when nothing is configured, so the whole architecture (transactions, optimistic concurrency, a transactional outbox, idempotent commands, authorization) runs and is testable with **zero external services**, and **Postgres** when `DATABASE_URL` is set. Nothing above the `DataSource` seam changes between them.
+
+The HTTP API is generated from the OpenAPI contract in the private `show-menu-contracts` package; no routes are hand-written (see `docs/conventions/WireContract.md`). Passage mounts `/auth/*` and `/me` itself.
 
 ## Prerequisites
 
-- **Swift 6.1+** (6.2 recommended)
-- **Docker** (for containerized builds and deployment)
-- **Google Cloud SDK** (`gcloud`) for Cloud Run deployment
-- **Firebase CLI** for local emulator development
-- A **GCP project** with Firestore enabled
-- **Read access to the private `rozd/show-menu-contracts` repo** (the OpenAPI wire contract, a SwiftPM dependency). Locally a working GitHub login (`gh auth login` or a git credential helper) is enough; CI and Docker builds use a fine-grained read-only token (see [docs/conventions/WireContract.md](docs/conventions/WireContract.md)).
+- **Swift 6.3+**
+- **Docker** (optional — for containerized builds, and for a local Postgres)
+- **Postgres** (optional — only when you move off the default SQLite driver)
+
+That's the whole list. The default path needs no database and no cloud account.
 
 ## Quick Start
 
-### 1. Clone and configure
-
 ```bash
-git clone <this-repo> show-menu-backend
-cd show-menu-backend
+make run     # swift run Run serve
+make test    # swift test
 ```
 
-### 2. Set up environment
+No environment variables, no configuration files, no services to start first.
 
-For local development with Firebase Emulators:
+## ⚠️ The default database is in-memory SQLite
 
-```bash
-export GCP_PROJECT_ID=demo-project
-export FIRESTORE_EMULATOR_HOST=localhost:9002
-export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
-```
+With no connection details configured, the app runs on an in-memory SQLite database. Be clear-eyed about what that means:
 
-For local development with a real GCP project:
+- **All data is lost when the process exits.** There is no file, no snapshot, no WAL.
+- **It does not work across instances.** Two replicas are two disjoint datasets; horizontal scaling silently corrupts your view of the world.
+- It exists so the app boots, and is testable without infrastructure.
 
-```bash
-export GCP_PROJECT_ID=show-menu-dev
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-```
+**Point it at Postgres before deploying anything you care about** (production requires `DATABASE_URL`) — see below. The app logs (and warns about) which database it booted with, so an operator can't mistake a demo for a deployment.
 
-### 3. Run locally
+## Running on Postgres
+
+Set the connection details; that is the whole switch — no code change, because both drivers are the same adapter:
 
 ```bash
-# With emulators: terminal 1 (builds ../show-menu-firebase/forwarders, then starts
-# the auth 9099 / firestore 9002 / functions 9001 emulators via firebase.vapor.json)
-make emulators
-
-# Terminal 2: the backend on :8080
-make run-local          # or: swift run Run
-
-# Terminal 3 (optional): the black-box contract suite
-make harness            # HARNESS_ARGS=smoke runs a single file
+make db-up                                       # or bring your own Postgres
+export DATABASE_URL=postgres://vapor:vapor@localhost:5432/vapor
+swift run Run                                    # migrations run automatically
 ```
 
-The emulator config lives in the sibling repo (`FIREBASE_DIR`, default `../show-menu-firebase`); a bare `firebase emulators:start` from this directory does not work. The `functions` emulator only runs the Auth/Firestore → Vapor event forwarders.
+On boot the app registers the database, applies any pending migrations, and logs `Store: postgres (Fluent)`. Without `DATABASE_URL` it warns instead, naming the in-memory SQLite database.
 
-### 4. Verify
+What changes: nothing at all in your code. The same commands, queries, use cases, outbox and idempotency layers run against the same tables and the same check-and-set on the `version` column — Postgres just makes them durable, concurrent and multi-instance. See [`Integration/Fluent/README.md`](Sources/ShowMenuBackend/Integration/Fluent/README.md) for how the adapter binds each port, the DSL-vs-plain-SQL split on the read side, and the portable-first dialect policy that keeps one statement running on both drivers.
 
+## Authentication
+
+**Passage** is wired as the authentication framework; it mounts `/auth/*` and `/me` itself. Authorization is handled by the IAM module (`Ability`/`Voter` checks in use cases).
+
+### Example Flows
+
+**Register a new account:**
 ```bash
-curl http://localhost:8080/api/v1/health   # → {"status":"ok"}
-curl http://localhost:8080/api/v1/version  # → v0.0.1+<branch>, revision: unknown
+curl -X POST http://localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "alice",
+    "password": "secret",
+    "confirmPassword": "secret"
+  }'
 ```
+
+**Login to get a bearer token:**
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "alice",
+    "password": "secret"
+  }'
+# Response: { "accessToken": "...", "user": { "id": "..." } }
+```
+
+**Use the token to call a protected endpoint:**
+```bash
+curl -X GET http://localhost:8080/me \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+The authenticated user is resolved through IAM (`RequestContext.principal`), so role changes take effect on the next request.
+
+### Configuration
+
+| Variable | Description |
+|---|---|
+| `APP_ORIGIN` | Public origin for Passage links (default: `http://localhost:<port>`) |
+| `JWKS` | Inline JWKS JSON with the token-signing key |
+| `JWKS_FILE_PATH` | Path to a JWKS file; used when `JWKS` is unset |
+
+If neither `JWKS` nor `JWKS_FILE_PATH` is set, an **ephemeral dev key** is generated at boot — all access tokens become invalid on restart (fine for local development, wrong for anything else).
+
+### Removing Authentication
+
+Delete `configurePassage` call + bearer authenticator middleware + `Integration/Passage/` + `Modules/IAM/IAM+Passage.swift`, and add an alternative principal middleware before authorization checks run. See [AGENTS.md](AGENTS.md) for details.
 
 ## Environment Variables
 
+Nothing is required. Everything below is optional:
+
 | Variable | Required | Description |
 |---|---|---|
-| `GCP_PROJECT_ID` | Yes | Google Cloud project ID |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Local only | Path to service account JSON (required outside Cloud Run/emulator) |
-| `GCP_SERVICE_ACCOUNT_JSON_PATH` | Deprecated | Fallback for `GOOGLE_APPLICATION_CREDENTIALS`; logs a deprecation warning |
-| `FIRESTORE_EMULATOR_HOST` | Emulator only | Firestore emulator (e.g., `localhost:9002`) |
-| `FIREBASE_AUTH_EMULATOR_HOST` | Emulator only | Auth emulator (e.g., `localhost:9099`) |
-| `PORT` | No | Server port (default: 8080) |
-| `K_SERVICE` | Auto (Cloud Run) | Set automatically by Cloud Run |
+| `PORT` | No | Server port (default: `8080`) |
+| `LOG_LEVEL` | No | Log level passed to Vapor's logging bootstrap (`trace`…`critical`) |
+| `DATABASE_URL` | No | Postgres connection URL for the Fluent adapter (wired in code — see **Running on Postgres** above) |
+| `DATABASE_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_NAME` | No | Connection details, used when `DATABASE_URL` is not set |
+| `DATABASE_AUTO_MIGRATE` | No | `true` (default) applies pending migrations at boot; set `false` to run `swift run Run migrate` yourself |
+| `APP_ORIGIN` | No | Public origin for Passage auth links (default: `http://localhost:<port>`) |
+| `JWKS` | No | Inline JWKS JSON with the token-signing key; if unset, an ephemeral dev key is generated |
+| `JWKS_FILE_PATH` | No | Path to a JWKS file; used when `JWKS` is unset |
 
 ## Architecture
 
 ```
 Sources/ShowMenuBackend/
-├── entrypoint.swift          # Application entry point
-├── configure.swift           # App configuration and GCP bootstrap
-├── routes.swift              # Calls registerContractHandlers() (routes come from the OpenAPI contract)
-├── App/                      # Application wiring (DI, GCP config)
-├── Lib/                      # Generic DDD + CQRS infrastructure
-├── Integration/              # Firestore, CloudRun, Eventarc
+├── entrypoint.swift          # Application entry point (trace middleware, lifecycle)
+├── configure.swift           # App configuration, integration-event registration
+├── routes.swift              # Route registration (HTTP routes come from the OpenAPI contract)
+├── App/                      # Application wiring (DI / CompositionRoot, outbox relay opt-in)
+├── Lib/                      # Generic DDD + CQRS + cross-cutting infrastructure (store-agnostic)
+├── Integration/              # Adapters: Fluent SQL store, Vapor glue (ETag, idempotency header, outbox job)
 └── Modules/                  # Business modules
-    ├── Catalog/              # Features (and, from S05, Plans); reference module for new ones
-    └── IAM/                  # Firebase Auth user lifecycle
+    └── IAM/                  # User account lifecycle + authorization
 ```
 
-Each module in `Modules/` follows the DDD layering: **Domain** (Entity, Event, Error, Repository protocol) → **Application** (Command/Query, UseCase, DTO, Mapper) → **Infrastructure** (Firestore Model, DataSource, Repository impl) → **Presentation** (Controller, `ContractAPI+<Module>.swift` witness, wire mapper).
+Each module in `Modules/` follows the DDD layering: **Domain** (Entity, Event, Error, Repository protocol, Specification) → **Application** (Command/Query, UseCase, DTO, Mapper, Authorization) → **Infrastructure** (store `Codable` Model, DataSource, Repository impl) → **Presentation** (controllers and contract witnesses, added with the contract).
 
-The HTTP API is generated from the OpenAPI spec in the private `show-menu-contracts` package (pinned by tag); there are no hand-written routes. See [docs/conventions/WireContract.md](docs/conventions/WireContract.md).
-
-For detailed architecture documentation — request flow, dependency injection, key patterns, and how to add modules — see [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md).
+For detailed architecture documentation — request flow, dependency injection, key patterns, swapping the persistence layer, and how to add modules — see [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md).
 
 ## Testing
 
@@ -100,193 +135,39 @@ For detailed architecture documentation — request flow, dependency injection, 
 swift test
 
 # Run a single test suite
-swift test --filter FeatureUseCaseTests
+swift test --filter UserOnboardUseCaseTests
 
-# Run with emulators for integration tests
-FIRESTORE_EMULATOR_HOST=localhost:9002 GCP_PROJECT_ID=demo-project swift test
+# Run a single test by name
+swift test --filter "onboard"
 ```
 
-Tests use the Swift Testing framework with in-memory test doubles (no Firestore needed). See [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md#testing) for test patterns and available doubles.
+Tests use the Swift Testing framework. Unit tests run against test doubles; the tests that need the real adapter run against an in-memory SQLite database. Either way: no services, no network. Only the Postgres-specific suite needs a server, and it is skipped unless `POSTGRES_TEST_URL` is set. See [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md#testing) for test patterns and available doubles.
 
 ## Deployment
 
-### Local Docker
+The app is a single statically-linked binary in a container. It listens on `PORT` (default 8080) and needs no configuration — beyond `DATABASE_URL`, if you want it to keep your data.
 
 ```bash
-docker build -t show-menu-backend .
-docker run -p 8080:8080 -e GCP_PROJECT_ID=your-project show-menu-backend
+docker build --secret id=github_token,env=GITHUB_CONTRACTS_TOKEN -t show-menu-backend .
+docker run -p 8080:8080 show-menu-backend
 ```
 
-### Deploying to Cloud Run
-
-This section walks through deploying the backend to Google Cloud Run with automated builds via Cloud Build, triggered on every push to your GitHub repository.
-
-#### Prerequisites
-
-- A [Google Cloud project](https://console.cloud.google.com/) with billing enabled
-- `gcloud` CLI installed and authenticated (`gcloud auth login`)
-- Your repository hosted on GitHub
-
-#### Step 1 — Enable GCP APIs
+Or with Compose:
 
 ```bash
-export PROJECT_ID=show-menu-dev
-
-gcloud config set project $PROJECT_ID
-
-gcloud services enable \
-  cloudbuild.googleapis.com \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  firestore.googleapis.com
+docker compose up app
 ```
 
-#### Step 2 — Create an Artifact Registry repository
+That image runs anywhere that takes a container — a VM, Kubernetes, a managed container service, a Raspberry Pi.
 
-Artifact Registry stores your Docker images. Create a repository in your preferred region:
+> **Before you deploy anything real:** set `DATABASE_URL`. On the default in-memory SQLite database every restart wipes the data and every additional replica sees a different dataset, so a rolling deploy or an autoscaler is enough to lose writes. See **Running on Postgres**.
 
-```bash
-export REGION=us-central1
-export SERVICE_NAME=show-menu-backend
+One other thing worth doing before production:
 
-gcloud artifacts repositories create show-menu-backend-repo \
-  --repository-format=docker \
-  --location=$REGION \
-  --description="Docker images for my backend"
-```
-
-#### Step 3 — Set up Firestore
-
-If you haven't already, create a Firestore database:
-
-```bash
-gcloud firestore databases create --location=$REGION
-```
-
-> **Note:** Firestore location cannot be changed after creation. Choose the same region as your Cloud Run service for lowest latency.
-
-#### Step 4 — Grant Cloud Build permissions
-
-Cloud Build needs permission to deploy to Cloud Run:
-
-```bash
-# Get the Cloud Build service account
-BUILD_SA=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')@cloudbuild.gserviceaccount.com
-
-# Grant Cloud Run Admin role
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:$BUILD_SA" \
-  --role="roles/run.admin"
-
-# Grant Service Account User role (needed to act as the runtime service account)
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:$BUILD_SA" \
-  --role="roles/iam.serviceAccountUser"
-```
-
-#### Step 5 — Connect GitHub and create a Cloud Build trigger
-
-1. Go to [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers) in the GCP Console
-2. Click **Connect Repository** and follow the prompts to connect your GitHub repository
-3. Click **Create Trigger** and configure:
-
-| Setting | Value |
-|---|---|
-| **Name** | `deploy-on-push` (or your preference) |
-| **Event** | Push to a branch |
-| **Branch** | `^main$` (or your default branch) |
-| **Configuration** | Cloud Build configuration file |
-| **Location** | `cloudbuild.yaml` (repository root) |
-
-4. Under **Substitution variables**, add:
-
-| Variable | Value | Example |
-|---|---|---|
-| `_REGION` | Your GCP region | `us-central1` |
-| `_REPOSITORY_NAME` | Artifact Registry repo name | `show-menu-backend-repo` |
-| `_SERVICE_NAME` | Cloud Run service name | `show-menu-backend` |
-| `_TAG` | Image tag | `$SHORT_SHA` |
-
-> `$PROJECT_ID` and `$SHORT_SHA` are provided automatically by Cloud Build.
-
-#### Step 6 — Deploy
-
-**Option A: Automatic deployment (recommended)**
-
-Push to your main branch. Cloud Build will automatically build, push, and deploy:
-
-```bash
-git push origin main
-```
-
-Monitor the build at [Cloud Build History](https://console.cloud.google.com/cloud-build/builds).
-
-**Option B: Manual deployment**
-
-Trigger a build manually from your local machine:
-
-```bash
-gcloud builds submit \
-  --region=$REGION \
-  --substitutions=_REGION=$REGION,_REPOSITORY_NAME=show-menu-backend-repo,_SERVICE_NAME=$SERVICE_NAME,_TAG=manual
-```
-
-#### Step 7 — Verify
-
-After the build completes (~5-15 minutes for the first build, faster with cache):
-
-```bash
-# Get the service URL
-SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')
-
-curl $SERVICE_URL/api/v1/health   # → {"status":"ok"}
-curl $SERVICE_URL/api/v1/version  # → v0.0.1+<branch>, revision: <revision>
-```
-
-For details on how the Cloud Build pipeline works and production tuning, see [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md#cloud-build-pipeline).
+- **The outbox relay** — integration events are recorded transactionally but only published once a relay drains them. It is opt-in: call `try app.startOutboxRelay()` in `configure(_:)` (see `App/Outbox+Vapor.swift`).
 
 ## API Endpoints
 
-All routes are operations in the `show-menu-contracts` OpenAPI spec and are served under `/api`.
+The HTTP API is defined by the OpenAPI contract in `show-menu-contracts` and served by generated routes (next commit). Passage mounts its own `/auth/*` and `/me` routes.
 
-### Platform and integrations
-
-| Method | Path | Access | Description |
-|---|---|---|---|
-| GET | `/api/v1/health` | public | Liveness, `{"status":"ok"}` |
-| GET | `/api/v1/version` | public | Build info (text) |
-| POST | `/api/v1/events/eventarc` | Eventarc (Google OIDC) | CloudEvents webhook |
-| POST | `/api/v1/subscriptions/jobs/check-expired` | Scheduler (OIDC or `X-Api-Key`) | Expire / warn / reconcile subscriptions |
-| POST | `/api/v1/payments/liqpay/callback` | public (signature-verified) | LiqPay payment callback |
-
-### Authenticated (Firebase ID token)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/accounts/:accountId/purchases` | Start a subscription purchase (returns invoice id) |
-| DELETE | `/api/v1/accounts/:accountId/purchases/:invoiceId` | Cancel a pending purchase |
-| DELETE | `/api/v1/accounts/:accountId/subscriptions/:subscriptionId` | Cancel a subscription |
-| GET | `/api/v1/users` | Find users |
-| GET | `/api/v1/users/:userId` | Get a user |
-
-### Catalog (admin only)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/plans/features` | Create a feature (200 `FeatureResponse`) |
-| PUT | `/api/v1/plans/features/:featureId` | Partially update a feature (absent fields keep their value) |
-| GET / POST | `/api/v1/plans` | List / create plans |
-| GET / PUT | `/api/v1/plans/:planId` | Get / update a plan |
-| PUT | `/api/v1/plans/:planId/activate` · `/deactivate` | Activate / deactivate a plan |
-| PUT | `/api/v1/plans/:planId/features` | Add a feature to a plan |
-| DELETE | `/api/v1/plans/:planId/features/:featureId` | Remove a feature from a plan |
-
-**Create feature payload:**
-```json
-{
-  "category": "ai",
-  "name": { "en": "AI Menu Generator", "uk": "Генератор меню ШІ" },
-  "description": { "en": "Optional description" }
-}
-```
-`category` is `ai` or `technicalSupport`; a missing or ill-typed field answers `400 bad_request`; a semantically invalid value answers `422 validation_failed`.
+Creating and deleting a user account emits `UserCreatedIntegrationEvent` / `UserDeletedIntegrationEvent`, which run follow-on work as a trusted `SystemPrincipal`.

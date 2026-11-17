@@ -5,13 +5,13 @@ Technical reference for developers working on this codebase. For setup and deplo
 ## Request Flow
 
 ```
-Generated route (registerHandlers) → ContractAPI witness → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Firestore
+Route → Controller → CommandHandler/QueryHandler → UseCase → Repository → DataSource → Store
 ```
 
 **Reads (Queries)** skip UnitOfWork — no transaction needed:
 
 ```
-Controller → QueryHandler → DataSource → Firestore
+Controller → QueryHandler → DataSource → Store
 ```
 
 **Writes (Commands)** go through UnitOfWork — domain events are collected during execution and dispatched after commit:
@@ -20,11 +20,11 @@ Controller → QueryHandler → DataSource → Firestore
 Controller → CommandHandler → UnitOfWork.execute { UseCase → Repository }
 ```
 
-The CommandHandler wraps the UseCase in `unitOfWork.execute { ctx in ... }`. The `ctx` (`UnitOfWorkContext`) carries the active `FirestoreTransaction` (`context.transaction`) and a `DomainEventCollector`. After the closure completes and the transaction commits, collected events are dispatched to registered `DomainEventHandler`s.
+The CommandHandler wraps the UseCase in `unitOfWork.execute { ctx in ... }`. The `ctx` (`UnitOfWorkContext`) carries the active store transaction (`context.transaction` — a `FluentTransaction`), a `DomainEventCollector`, and the transaction-bound outbox channel. After the closure completes and the transaction commits, collected events are dispatched to registered `DomainEventHandler`s.
 
 ## Dependency Injection
 
-Shared infrastructure (transport, GCP config/auth, Firestore, the DDD dispatchers and `unitOfWork`) is wired in `App/Vapor+Dependencies.swift` via `CompositionRoot`; each module's factories live in a `Modules/<Module>/CompositionRoot+<Module>.swift` extension on `CompositionRoot`. Access from anywhere via `app.deps`.
+Shared infrastructure (transport, the store `database`, the DDD dispatchers and `unitOfWork`) is wired in `App/Vapor+Dependencies.swift` via `CompositionRoot`; each module's factories live in a `Modules/<Module>/CompositionRoot+<Module>.swift` extension on `CompositionRoot`. Access from anywhere via `app.deps`.
 
 ### Resolver
 
@@ -40,7 +40,7 @@ Repositories and UseCases are created **per-request** via factory closures:
 | `UseCaseFactory<U>` | `@Sendable (UnitOfWorkContext) -> U` | Creates a use case bound to a transaction |
 | `DataSourceFactory<M>` | `@Sendable (String, any Sendable) -> any QueryableDataSource<M>` | Creates a data source for a collection prefix + transaction |
 
-These factories receive a `UnitOfWorkContext` so that each operation shares the same `FirestoreTransaction` (`context.transaction`) and event collector.
+These factories receive a `UnitOfWorkContext` so that each operation shares the same store transaction (`context.transaction`) and event collector.
 
 ### Wiring a new dependency
 
@@ -93,16 +93,16 @@ The `Mapper` protocol defines three conversion directions:
 
 | Method | From | To | Used by |
 |---|---|---|---|
-| `toEntity(model:)` | Firestore model | Domain entity | Repository (fetch) |
-| `toModel(entity:)` | Domain entity | Firestore model | Repository (insert) |
+| `toEntity(model:)` | Store model | Domain entity | Repository (fetch) |
+| `toModel(entity:)` | Domain entity | Store model | Repository (insert) |
 | `toDTO(entity:)` | Domain entity | API response DTO | UseCase (return value) |
-| `toDTO(model:)` | Firestore model | API response DTO | QueryHandler (read path) |
+| `toDTO(model:)` | Store model | API response DTO | QueryHandler (read path) |
 
 The read path uses `toDTO(model:)` directly, bypassing entity creation for efficiency.
 
 ### DataSource vs Repository
 
-- **DataSource** (`QueryableDataSource<Model>`) — raw CRUD (insert, update, delete, fetch) over Firestore models. Used directly by QueryHandlers for reads.
+- **DataSource** (`QueryableDataSource<Model>`) — raw CRUD (insert, update, delete, fetch) over store models. Used directly by QueryHandlers for reads.
 - **Repository** (`Repository<Entity, Model, DTO>`) — domain-level abstraction. Holds a `context: any UnitOfWorkContext`; resolves its DataSource via `dataSourceFactory("", context.transaction)` and reaches the event collector via `context.collector`. Works with entities, records domain events, delegates persistence to a DataSource. Exposes `insert`, `update`, and `delete`; conforming types implement `doInsert`, `doUpdate`, `doDelete`. Used by UseCases for writes.
 
 ### QueryableDataSource
@@ -113,56 +113,37 @@ Adds filtered/ordered query support via:
 - `DataSourceFilter` — field-level predicates (`.equalTo`, `.greaterThan`, etc.)
 - `DataSourceOrder` — field + direction sorting
 
-## GCP Environment Detection
-
-`Vapor+GCP.swift` auto-detects the runtime environment from environment variables:
-
-| Environment | Detection | Auth Provider |
-|---|---|---|
-| **Emulator** | Both `FIRESTORE_EMULATOR_HOST` and `FIREBASE_AUTH_EMULATOR_HOST` set | `EmulatorAuthProvider` (no-op) |
-| **Cloud Run** | `K_SERVICE` set | `GoogleAuthProvider(.applicationDefault)` (ADC → metadata server) |
-| **Standalone** | otherwise; key path from `GOOGLE_APPLICATION_CREDENTIALS` (deprecated fallback: `GCP_SERVICE_ACCOUNT_JSON_PATH`) | `GoogleAuthProvider(.serviceAccountKey(_:))` (explicit key, not ADC) |
-
-Detection runs in that order. Standalone with neither path variable set is a startup error, and the deprecated variable logs a warning. The provider is built once at startup in `GoogleCloudPlatform.fromEnvironment(environment:logger:)`, so bad credentials fail the boot.
-
-Each `GCPAuthProvider` implements `func getAccessToken() async throws -> String?` to produce a bearer token for GCP REST/gRPC calls.
-
 ## Integration Layer
 
-### Firestore (`Integration/Firestore/`)
+Everything store- or framework-specific lives under `Integration/`. `Lib/` never imports from it — that separation is what makes the store swappable.
 
-- `FirestoreTransaction` (`Firestore+TransactionExtension`) — a transport-erased, `Sendable` wrapper over `Transaction<Transport>`. Created for a real transaction inside `Firestore.runInTransaction { … }`, or `.direct(firestore:)` for non-transactional reads. DataSources operate on this type, not on `Firestore` directly.
-- `FirestoreTransactionUnitOfWork` — the production `UnitOfWork`. Runs the work closure inside `firestore.runInTransaction`, exposes the live `FirestoreTransaction` via `context.transaction`, and dispatches collected domain events after commit.
-- `FirestoreDataSource<Model>` — generic CRUD data source over a `FirestoreTransaction`. Handles document serialization and collection paths.
-- `FirestorePolymorphicDataSource` — single-collection store keyed by `PolymorphicDataKey<T>`, for heterogeneous values (building block; not wired by default).
-- `FirestoreDataSource+Query` — translates `DataSourceQuery` into Firestore structured queries.
-- `FirestoreError` — maps gRPC status codes to domain-friendly errors (not found, already exists, permission denied).
+### SQL store (`Integration/Fluent/`)
 
-### Cloud Run (`Integration/CloudRun/`)
+The persistence adapter: Fluent over SQL, wired by `configureFluentStore(app)` in `configure(_:)`. It picks its driver from the environment — Postgres when `DATABASE_URL` (or `DATABASE_HOST`/`_PORT`/`_USERNAME`/`_PASSWORD`/`_NAME`) is set, an **in-memory SQLite** database otherwise, so the template boots with nothing installed. Both are the same adapter; only the dialect differs. Its own [README](Sources/ShowMenuBackend/Integration/Fluent/README.md) has the full picture, including the read-side DSL-vs-plain-SQL split and the portable-first dialect policy. The essentials:
 
-- `GCPAuthProvider` — protocol returning an OAuth2 bearer token. Impls: `GoogleAuthProvider` — backed by Google's `swift-google-auth` (`GoogleAuth` product); `.applicationDefault` (ADC → metadata server on Cloud Run) or `.serviceAccountKey(Data)`; scopes `cloud-platform` + `identitytoolkit`; the library caches the token and refreshes it proactively — and `EmulatorAuthProvider` (returns `"owner"`).
-- `GoogleCloudPlatformLogHandler` — emits structured JSON log entries for Cloud Logging (severity, trace correlation, source location).
-- `GoogleCloudPlatformTraceMiddleware` — propagates the `X-Cloud-Trace-Context` header into `RequestContext` so logs correlate to traces. Both are installed in `entrypoint.swift` when `K_SERVICE` is set.
+- `FluentTransaction` — the transport-erased handle. `.transaction(database:)` wraps the connection Fluent opened for a command (statements enlist automatically); `.direct(database:)` is for query handlers and the relay. It also vends the `SQLDatabase` beneath the Fluent handle. There is no write buffer — Postgres has a real transaction, so "enlisting" is just issuing statements on that connection.
+- `FluentDataSource` (+`Query`, +`Concurrency`) — the `DataSource` binding. It works at the **SQL layer** rather than through Fluent's ORM, because `DataSource<Model>` is generic over an opaque `Codable` model while a `FluentKit.Model` is a bespoke class per table: `SQLQueryEncoder`/`SQLRowDecoder` let the store model *be* the row, so a module's data source is four lines and needs no record class or mapper. Filters, orders and limits are pushed down into SQL; a dotted field path throws rather than returning unfiltered rows.
+- **Plain-SQL reads.** `DataSourceQuery` deliberately carries only what any binding can push down, so it has no `OFFSET`, no case-insensitive matching and no way to return a total with a page. Reads that need more get a narrow, module-owned port bound with hand-written SQL over `transaction.sql`.
+- `FluentUnitOfWork` — `database.transaction { … }`, with domain events dispatched **after** commit and `ConcurrencyError` surfaced unchanged. It also **re-binds `RequestContext` inside the transaction**: FluentKit runs the closure in a `Task` started on the event loop, which inherits no task-locals, so without `RequestContext.snapshot`/`restore(_:)` every command would run with no principal and no idempotency key — silently.
+- `FluentOutboxStore` / `FluentIdempotencyStore` / `FluentInboxStore` — these three *do* use Fluent's ORM (`OutboxMessageRecord`, `IdempotencyKeyRecord`, `InboxMessageRecord`): their schemas are fixed, so there is no genericity to fight and the typed query builder reads better. The idempotency and inbox tables' **primary key is the in-flight guard** — a duplicate `INSERT` violates it and aborts the transaction.
+- `FluentCoding` — the one row-coding configuration: camelCase coding keys → `snake_case` columns, `nil` written as an explicit `NULL` (so an update clears a column instead of leaving a stale value), and the same transform applied to query field names so a filter on `createdAt` reaches `created_at`.
+- `Migration/` — the adapter's own tables. A module's table lives with the module, in `Modules/<Module>/Infrastructure/Migration/`, and is registered in `App/Fluent+Vapor.swift`.
 
-### Firebase (`Integration/Firebase/`)
+Optimistic concurrency is a single conditional statement — `UPDATE … SET …, version = $next WHERE id = $id AND version = $expected RETURNING id` — so there is no read-then-write window at all. `RETURNING` is load-bearing: Fluent's `QueryBuilder.update()` returns `Void`, and a CAS that matched zero rows would otherwise look like success.
 
-- `FirebaseCustomTokenMinter` — protocol `createCustomToken(uid:) -> String`. Per-environment impls: `ServiceAccountCustomTokenMinter` (RS256 via swift-crypto), `CloudRunCustomTokenMinter` (IAM `signBlob`), `EmulatorCustomTokenMinter` (unsigned `alg: none`). Building block; not wired by default.
+### Vapor glue (`Integration/Vapor/`)
 
-### Cloud Tasks (`Integration/CloudTasks/`)
+Framework integration, independent of the store:
 
-- `CloudTasksClient` — protocol for enqueuing HTTP tasks; `GCPCloudTasksClient` (REST) + `InMemoryCloudTasksClient` (test double). Building block; not wired by default.
+- `TraceMiddleware` — reads `X-Request-ID` (falling back to `X-Correlation-ID`), or generates an id, and populates `RequestContext.traceId` so logs and downstream commands/events correlate to one request. Installed at the beginning of the middleware chain in `entrypoint.swift`.
+- `ETag+Vapor` — `Version.etag`, `Request.ifMatch`, `Response.setETag`: the optional ETag/`If-Match` edge layer over optimistic concurrency.
+- `IdempotencyKey+Request` — `IdempotencyKeyMiddleware`, lifting the `Idempotency-Key` header into `RequestContext`.
+- `OutboxRelayJob` — the `AsyncScheduledJob` draining the outbox; scheduled by `App/Outbox+Vapor.swift` via `try app.startOutboxRelay()` (opt-in).
+- `VaporQueueIntegrationEventChannel` — an `IntegrationEventChannel` over Vapor Queues. Building block; not wired by default.
 
-### Pub/Sub (`Integration/PubSub/`)
+### Standard (`Integration/Standard/`)
 
-- `PubSubClient` — publish / ensure-topic / ensure-subscription protocol; `GCPPubSubClient` (REST) + `InMemoryPubSubClient` (test double).
-- `PubSubIntegrationEventChannel` — an `IntegrationEventChannel` that serializes integration events to Pub/Sub messages.
-- `PubSubPushController` — decodes Pub/Sub **push** deliveries (no route: it is not in the OpenAPI contract, so it is not exposed until an operation is added there), decode the envelope, and dispatch the integration event (always return 200 to prevent retries). Building block; not wired by default.
-
-### Eventarc (`Integration/Eventarc/`)
-
-- `CloudEventsParser` — parses CloudEvents headers (`ce-type`, `ce-source`, `ce-subject`, etc.) from incoming webhooks.
-- `EventarcController` (`Modules/IAM/Presentation/Controller/`) — serves `POST /api/v1/events/eventarc` (operation `handleEventarcEvent`), turning CloudEvents into integration events. Authentication: `EventarcAuthenticator`, applied by `ContractAccessMiddleware`.
-- Supports Firebase Auth triggers (user created/deleted) out of the box.
+Small Foundation extensions shared by the adapters.
 
 ### Integration Events
 
@@ -170,7 +151,7 @@ Cross-context events (between modules or from external sources):
 
 - `IntegrationEvent` — protocol with `kind` (string discriminator), `id`, `metadata`
 - `IntegrationEventHandler` — `func handle(_ event:) async throws` (throwing, unlike DomainEventHandler)
-- `IntegrationEventChannel` — publishes events (`InMemoryIntegrationEventChannel`, `VaporQueueIntegrationEventChannel`, or `PubSubIntegrationEventChannel`)
+- `IntegrationEventChannel` — publishes events (`InProcessIntegrationEventChannel` for in-process delivery, `VaporQueueIntegrationEventChannel` for queue-based transport)
 - `IntegrationEventRegistry` — registers event types for deserialization by `kind`
 - `IntegrationEventDispatcher` — routes deserialized events to their handlers
 
@@ -178,17 +159,51 @@ Two registration points are needed:
 1. **Registry** — `registry.register(MyEvent.self)` — enables deserialization
 2. **Dispatcher** — `dispatcher.register(handler)` — enables routing
 
+For *reliable* cross-process delivery, don't publish after commit — record into the transactional outbox inside the command's transaction (`context.outbox.record(_:)`) and let the relay publish. See the Transactional Outbox section in [AGENTS.md](AGENTS.md).
+
+## Persistence: SQLite, Postgres, and the seam
+
+Aggregate storage is **always a SQL database**. That is a decision, not a default: the two properties the architecture rests on both depend on it — one generic `Repository` over `DataSource` (because `SQLQueryEncoder`/`SQLRowDecoder` let a plain `Codable` struct *be* the row), and a read side free to drop to hand-written SQL. A document or key-value store satisfies neither, so none sits behind `DataSource`.
+
+### Changing driver
+
+There is no code change. `configureFluentStore` reads the environment:
+
+| | SQLite (default) | Postgres |
+|---|---|---|
+| Selected by | nothing configured | `DATABASE_URL`, or `DATABASE_HOST` + `DATABASE_USERNAME` |
+| Durable / multi-instance | no / no | yes / yes |
+| Concurrency | single writer | real concurrent writers |
+| Announced at boot as | a warning | `Store: postgres (Fluent)` |
+
+Everything above `Integration/` is identical either way, which is what makes the SQLite suite a genuine test of the Postgres path — see the *Dialect policy* in the adapter's README for the rule that keeps it so.
+
+### The extension point
+
+The SQL database is reached through one dependency, `appDatabase` on `Application.Dependencies`. A *future* store — a streaming-snapshot store, a denormalized read model — registers as its **own** dependency beside it, with its **own types**, never behind the `DataSource` port and never as an `AggregateRoot` source. Adding one means a property on the protocol, a `configure<Name>Store(_:)` that builds it, and the factories that need it resolving it; `Lib/`, Domain, Application and Presentation stay untouched.
+
+### What must **not** change
+
+**`Lib/` needs no changes** for any of this. If a persistence change tempts you to edit anything under `Lib/`, the abstraction has sprung a leak — fix the leak rather than the library. The same goes for the Domain, Application and Presentation layers of every module: only `Infrastructure/` is store-aware.
+
+### Practical notes
+
+- Keep the **read-before-write** ordering that `IdempotencyStore` and `InboxStore` assume. SQL does not need it; the port keeps it so the contract stays satisfiable on a stricter store, and it documents why the API is split at all.
+- Keep `ConcurrencyError` distinct from generic store errors all the way to the edge — the ETag layer depends on telling `409` from `500`.
+- The outbox's atomicity guarantee only holds if `append` really joins the command's transaction.
+- **Make a failed check-and-set detectable.** An update API that cannot report how many rows it affected makes a CAS that matched nothing indistinguishable from success — a silently lost update. That is why the adapter uses `RETURNING`.
+
 ## Adding a New Module
 
 1. **Create the module directory** under `Sources/{APP_NAME}/Modules/YourModule/`
 
 2. **Domain layer** — Entity (AggregateRoot), Event (DomainEvent + EventKind enum), Error, Repository protocol
 
-3. **Infrastructure layer** — Firestore Model (Codable), FirestoreDataSource, FirestoreRepository
+3. **Infrastructure layer** — store model (`Codable`, plus `VersionedModel` for check-and-set), concrete DataSource, concrete Repository
 
 4. **Application layer** — DTO, Mapper, DataSource protocol, Command + Handler, Query + Handler, UseCase
 
-5. **Presentation layer** — Controller (generated `Operations.X.Input/Output`), `ContractAPI+{Module}.swift` witness, wire mapper. Define the operations in `show-menu-contracts` first; see `docs/conventions/WireContract.md`
+5. **Presentation layer** — Controller, RouteCollection
 
 6. **Vapor integration** — `{Module}+Vapor.swift` with `extension {Entity}DTO: Content {}`
 
@@ -204,7 +219,15 @@ Two registration points are needed:
    var createEntityCommandHandler: CreateEntityCommandHandler { get }
    ```
 
-8. **Expose the operations** — contract first: add them to `show-menu-contracts/Sources/ShowMenuContracts/openapi.yaml`, release a tag, bump it in `Package.swift`, then add `Presentation/ContractAPI+{Module}.swift` forwarding to the controller and an entry per operation in `ContractAccessMiddleware.table`. No routes are registered by hand (`docs/conventions/WireContract.md`).
+8. **Register routes** in `routes.swift`:
+   ```swift
+   let entityController = EntityController(
+       getEntityQueryHandler: app.deps.getEntityQueryHandler,
+       listEntitiesQueryHandler: app.deps.listEntitiesQueryHandler,
+       createEntityCommandHandler: app.deps.createEntityCommandHandler
+   )
+   try app.register(collection: EntityRouteV1(controller: entityController))
+   ```
 
 ## Testing
 
@@ -214,126 +237,95 @@ Tests use the **Swift Testing** framework (`@Suite`, `@Test`, `#expect`, `#requi
 
 ### Test Doubles
 
-Located in `Tests/{APP_NAME}Tests/Support/`:
+Located in `Tests/{APP_NAME}Tests/Support/`. They are named `Spy*` / `Stub*` / `Recording*` so they never read as production types:
 
 | Double | Replaces | Key feature |
 |---|---|---|
-| `InMemoryDataSource<Model>` | `FirestoreDataSource` | Tracks `insertedModels`, `deletedIds`; supports `seed(models:)` |
-| `StubUnitOfWork` | `FirestoreTransactionUnitOfWork` | Provides `StubUnitOfWorkContext` with in-memory collector |
-| `StubUnitOfWorkContext` | `FirestoreTransactionUnitOfWorkContext` | Exposes `collector` for event assertions |
+| `SpyDataSource<Model>` | a concrete DataSource | Tracks `insertedModels`, `deletedIds`; supports `seed(models:)` |
+| `SpyVersionedDataSource<Model>` | a versioned DataSource | Implements check-and-set in-body, for optimistic-concurrency tests |
+| `StubUnitOfWork` | `FluentUnitOfWork` | Provides `StubUnitOfWorkContext`; commits/rolls back recorded outbox rows to `committedOutbox` |
+| `StubUnitOfWorkContext` | the real UnitOfWork context | Exposes `collector` (event assertions), stub transaction and outbox channel |
+| `RecordingOutboxStore` | `FluentOutboxStore` | Captures `appended` rows; `failAppend` fault injection |
+| `BufferingOutboxStore` | `FluentOutboxStore` | Models buffer-then-commit/rollback, for atomicity tests |
+| `StubIdempotencyStore` | `FluentIdempotencyStore` | Scriptable reserve/complete outcomes |
+| `StubInboxStore` | `FluentInboxStore` | Scriptable reserve/complete outcomes for consumer de-duplication |
+| `StubSQLDatabase` / `StubSQLRow` | a live Postgres | Conforms to both `SQLDatabase` and Fluent's `Database`; captures emitted SQL and returns canned rows, so the Fluent adapter is testable with no server |
 | `SpyDomainEventDispatcher` | `DomainEventDispatcher` | Captures dispatched events in `dispatchedEvents` |
+| `SpyIntegrationEventDispatcher` / `SpyIntegrationEventChannel` | their real counterparts | Capture dispatched / published integration events |
 | `CapturingLogHandler` | `LogHandler` | Records log messages for assertion |
+| `StubPrincipal` | `Principal` | Minimal identity for authorization tests |
+
+Tests that need genuine transactional behaviour (real transactions, real primary-key violations, `RETURNING`-based check-and-set) use a real in-memory SQLite database via the `withSQLiteDatabase` fixture instead of a double — the default driver needs no external service, so there is nothing to fake. Only `FluentPostgresIntegrationTests` needs a server, and it is skipped unless `POSTGRES_TEST_URL` is set.
+
+The Fluent adapter's unit tests assert the **SQL it emits** against `StubSQLDatabase`. The properties only a live database can prove — migrations apply, a real CAS race, an outbox row vanishing with a rolled-back transaction, the idempotency primary-key violation — live in `Tests/{APP_NAME}Tests/Integration/` and are skipped unless `POSTGRES_TEST_URL` is set:
+
+```bash
+docker compose --profile postgres up -d db
+POSTGRES_TEST_URL=postgres://vapor:vapor@localhost:5432/vapor swift test
+```
 
 ### Test Pattern
 
 Every UseCase test follows the `makeSUT()` pattern:
 
 ```swift
-@Suite("FeatureUseCaseTests")
-struct FeatureUseCaseTests {
+@Suite("UserOnboardUseCase")
+struct UserOnboardUseCaseTests {
     private func makeSUT() -> (
-        ds: InMemoryDataSource<FeatureModel>,
-        collector: InMemoryDomainEventCollector,
+        ds: SpyDataSource<UserModel>,
+        collector: InProcessDomainEventCollector,
         context: StubUnitOfWorkContext
     ) {
-        let ds = InMemoryDataSource<FeatureModel>(id: { $0.id })
-        let collector = InMemoryDomainEventCollector()
+        let ds = SpyDataSource<UserModel>(id: { $0.id })
+        let collector = InProcessDomainEventCollector()
         let context = StubUnitOfWorkContext(transaction: "stub", collector: collector)
         return (ds, collector, context)
     }
 
     private func makeRepoFactory(
-        ds: InMemoryDataSource<FeatureModel>
-    ) -> RepositoryFactory<any FeatureRepository> {
+        ds: SpyDataSource<UserModel>
+    ) -> RepositoryFactory<any UserRepository> {
         { ctx in
-            FirestoreFeatureRepository(
-                mapper: FeatureMapper(),
+            DefaultUserRepository(
+                mapper: UserMapper(),
                 dataSourceFactory: { _, _ in ds },
                 context: ctx
             )
         }
     }
 
-    @Test("creates feature with valid input")
-    func happyPath() async throws {
+    @Test("happy path inserts user and records created event")
+    func onboard_happyPath() async throws {
         let (ds, collector, context) = makeSUT()
-        let sut = CreateFeatureUseCase(
+        let useCase = UserOnboardUseCase(
             context: context,
             repositoryFactory: makeRepoFactory(ds: ds),
-            mapper: FeatureMapper(),
             logger: Logger(label: "test")
         )
 
-        let result = try await sut.execute(params: .init(category: "ai", name: ["en": "Test"], description: nil))
+        try await useCase.execute(params: .init(
+            userId: User.Id(rawValue: "u-1"),
+            email: "alice@example.com",
+            displayName: "Alice"
+        ))
 
-        #expect(result.name == ["en": "Test"])
-        let inserted = await ds.insertedModels
-        #expect(inserted.count == 1)
+        #expect(await ds.insertedModels.count == 1)
+        #expect(await collector.drain().count == 1)
     }
 }
 ```
 
 **Key points:**
-- `InMemoryDataSource` replaces Firestore — no network, no emulator needed
+- `SpyDataSource` stands in for the module's data source — no store, no transaction semantics, just recorded calls
 - `StubUnitOfWorkContext` provides the collector to capture domain events
 - Assertions check both the return value (DTO) and side effects (inserted models, dispatched events)
 - Seed data with `await ds.seed(models: [...])` for update/delete tests
 
-## Cloud Build Pipeline
-
-The `cloudbuild.yaml` runs four steps:
-
-### Step 1: Cache Pull
-```yaml
-docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY_NAME}/${_SERVICE_NAME}:latest || exit 0
-```
-Pulls the previous `:latest` image to reuse Docker layers. `|| exit 0` ensures the build continues even on the first run when no image exists.
-
-### Step 2: Docker Build
-```yaml
-DOCKER_BUILDKIT=1 docker build \
-  -t ...:$SHORT_SHA \
-  -t ...:latest \
-  --cache-from ...:latest .
-```
-Builds with BuildKit. Tags with `$SHORT_SHA` (immutable, traceable) and `latest` (for caching next build). `--cache-from` reuses layers from the pulled image.
-
-### Step 3: Push
-Pushes the `$SHORT_SHA`-tagged image to Artifact Registry.
-
-### Step 4: Deploy
-```yaml
-gcloud run deploy ${_SERVICE_NAME} \
-  --image=...:$SHORT_SHA \
-  --region=${_REGION} \
-  --memory=512Mi \
-  --platform=managed \
-  --allow-unauthenticated \
-  --min-instances=0 \
-  --max-instances=5
-```
-
-### Substitution Variables
-
-| Variable | Source | Description |
-|---|---|---|
-| `_REGION` | User-provided (trigger config) | GCP region |
-| `_REPOSITORY_NAME` | User-provided (trigger config) | Artifact Registry repo name |
-| `_SERVICE_NAME` | User-provided (trigger config) | Cloud Run service name |
-| `$PROJECT_ID` | Cloud Build built-in | GCP project ID |
-| `$SHORT_SHA` | Cloud Build built-in | Short commit hash |
-
-### Timing
-
-- First build: ~15 minutes (no cache, full Swift compilation)
-- Cached builds: ~3-5 minutes (only changed layers rebuild)
-- Timeout: 1800 seconds (30 minutes)
-
 ## Production Considerations
 
-- **Scaling** — Adjust `--min-instances` and `--max-instances` in `cloudbuild.yaml`. Set `--min-instances=1` to eliminate cold starts (costs more).
-- **Memory** — Default 512 MiB. Increase if you see OOM errors.
-- **Authentication** — Template uses `--allow-unauthenticated`. Remove this and add [IAP](https://cloud.google.com/iap) or API keys for protected endpoints.
-- **Custom domain** — Map via `gcloud run domain-mappings create`.
-- **Secrets** — Use [Secret Manager](https://cloud.google.com/secret-manager) instead of environment variables for sensitive values.
-- **Concurrency** — Swift 6.2 strict concurrency is enforced. All types are `Sendable`. Entity classes use `@unchecked Sendable`.
+- **Persistence first.** The *default* driver is in-memory SQLite: non-durable and single-instance. Nothing else on this list matters until you set `DATABASE_URL` — see [Persistence: SQLite, Postgres, and the seam](#persistence-sqlite-postgres-and-the-seam).
+- **Scaling.** On Postgres the app is stateless and scales horizontally; the only in-process state is the outbox relay's schedule (safe to run on several instances since delivery is at-least-once and consumers dedup) and the in-process integration-event channel (move to a real transport for multi-instance delivery).
+- **Authentication.** Passage is wired and mounts `/auth/*` and `/me` itself; contract-served routes are guarded per operation (wired with the contract). `PassagePrincipalMiddleware` binds the authenticated user to `RequestContext.principal`, resolving roles through IAM's `User` query handler on every request. Authorization checks (`Ability`/`Voter`) are enforced by use cases; PEPs fail closed if the principal is unset. To remove Passage: delete `configurePassage` call, the middleware group, and `Integration/Passage/` + `Modules/IAM/IAM+Passage.swift`.
+- **Secrets.** Read them from the environment at startup in `configure(_:)`; there is deliberately no secret store binding.
+- **Logging.** `LOG_LEVEL` selects the level at bootstrap. `TraceMiddleware` populates `RequestContext.traceId` — include it in structured log metadata so a request can be reconstructed.
+- **Concurrency.** Swift 6.3 toolchain; strict concurrency is enforced. All types are `Sendable`; entity classes use `@unchecked Sendable`.

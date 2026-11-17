@@ -6,7 +6,10 @@ struct GetUserQueryHandler: QueryHandler {
     typealias Result = UserDTO?
 
     let dataSourceFactory: DataSourceFactory<UserModel>
-    let transaction: FirestoreTransaction
+    /// The non-transactional store handle, passed straight through to the
+    /// data-source factory. Type-erased on purpose: which adapter is active is the
+    /// composition root's business, not the Application layer's.
+    let transaction: any Sendable
     let mapper: any Mapper<User, UserModel, UserDTO>
     let logger: Logger
 

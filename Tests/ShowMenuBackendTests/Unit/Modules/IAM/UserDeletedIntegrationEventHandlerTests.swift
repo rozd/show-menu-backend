@@ -11,17 +11,17 @@ struct UserDeletedIntegrationEventHandlerTests {
         Logger(label: "test", factory: { _ in CapturingLogHandler() })
     }
 
-    private func makeSUT() -> (
-        ds: InMemoryDataSource<UserModel>,
+    private func makeSUT(inbox: StubInboxStore = StubInboxStore()) -> (
+        ds: SpyDataSource<UserModel>,
         uow: StubUnitOfWork,
         handler: UserDeletedIntegrationEventHandler
     ) {
-        let ds = InMemoryDataSource<UserModel>(id: { $0.id })
+        let ds = SpyDataSource<UserModel>(id: { $0.id })
         let uow = StubUnitOfWork()
         let logger = makeLogger()
         let mapper = self.mapper
         let repoFactory: RepositoryFactory<any UserRepository> = { ctx in
-            FirestoreUserRepository(
+            DefaultUserRepository(
                 mapper: mapper,
                 dataSourceFactory: { _, _ in ds },
                 context: ctx
@@ -38,7 +38,10 @@ struct UserDeletedIntegrationEventHandlerTests {
         let commandHandler = DeleteUserAccountCommandHandler(
             unitOfWork: uow,
             useCaseFactory: useCaseFactory,
-            inbox: InboxComponents(storeFactory: { _ in StubInboxStore() }),
+            inbox: InboxComponents(
+                storeFactory: { _ in inbox },
+                configuration: InboxConfiguration.default
+            ),
             logger: logger
         )
         let handler = UserDeletedIntegrationEventHandler(
@@ -85,5 +88,30 @@ struct UserDeletedIntegrationEventHandlerTests {
         let deleted = await ds.deletedIds
         #expect(deleted.isEmpty)
         #expect(uow.dispatchedEvents.isEmpty)
+    }
+
+    @Test("same event id delivered twice results in one delete")
+    func handle_inboxDeduplication() async throws {
+        let inbox = StubInboxStore()
+        let (ds, _, handler) = makeSUT(inbox: inbox)
+        await ds.seed(UserModel(id: "u-dedup-1", email: "dedup@example.com"))
+
+        let eventId = UUID()
+        let event = UserDeletedIntegrationEvent(
+            userId: "u-dedup-1",
+            email: "dedup@example.com",
+            displayName: "Dedup"
+        )
+
+        try await RequestContext.$integrationEventId.withValue(eventId) {
+            try await handler.handle(event)
+        }
+        try await RequestContext.$integrationEventId.withValue(eventId) {
+            try await handler.handle(event)
+        }
+
+        let deleted = await ds.deletedIds
+        #expect(deleted.count == 1, "Same event id should only delete once")
+        #expect(await inbox.count == 1, "Inbox should have one processed record")
     }
 }

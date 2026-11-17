@@ -7,7 +7,7 @@
 
 /// The trusted internal actor for system-initiated work that originates outside
 /// any end-user request — e.g. reconciling the local `User` record in response to
-/// a Firebase Auth deletion webhook.
+/// an account-deleted integration event.
 ///
 /// It holds the administrator role so such flows pass *through* the normal
 /// authorization rules rather than bypassing them. In a multi-module system this

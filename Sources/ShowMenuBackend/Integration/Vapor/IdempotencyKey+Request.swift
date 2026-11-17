@@ -22,7 +22,7 @@ extension Request {
 /// `RequestContext.idempotencyKey` for the duration of the request, so the
 /// command pipeline's ``IdempotentCommandHandler`` can read it as request-scoped
 /// metadata (never as a field on a command DTO). Mirrors how
-/// `GoogleCloudPlatformTraceMiddleware` binds `RequestContext.traceId`.
+/// ``TraceMiddleware`` binds `RequestContext.traceId`.
 struct IdempotencyKeyMiddleware: AsyncMiddleware {
 
     func respond(to req: Request, chainingTo next: any AsyncResponder) async throws -> Response {

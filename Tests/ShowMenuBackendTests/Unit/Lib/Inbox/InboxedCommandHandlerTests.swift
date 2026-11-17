@@ -41,12 +41,15 @@ private final class SpyCommandHandler: InboxedCommandHandler, @unchecked Sendabl
 @Suite("InboxedCommandHandler")
 struct InboxedCommandHandlerTests {
 
+    private let configuration = InboxConfiguration.default
+
     private func makeSUT(
         store: StubInboxStore
     ) -> SpyCommandHandler {
         SpyCommandHandler(
             inbox: InboxComponents(
-                storeFactory: { _ in store }
+                storeFactory: { _ in store },
+                configuration: configuration
             )
         )
     }
@@ -179,7 +182,8 @@ struct InboxedCommandHandlerTests {
         // Second consumer (OtherCommand).
         let sut2 = OtherSpyHandler(
             inbox: InboxComponents(
-                storeFactory: { _ in store }
+                storeFactory: { _ in store },
+                configuration: configuration
             )
         )
         try await RequestContext.$integrationEventId.withValue(eventId) {
@@ -190,34 +194,5 @@ struct InboxedCommandHandlerTests {
         #expect(sut1.callCount == 1)
         #expect(sut2.callCount == 1)
         #expect(await store.count == 2)   // One marker per consumer
-    }
-
-    // MARK: - Expired slot carries the overwrite ticket
-
-    @Test("an expired record yields a proceed ticket marked overwriteExpired")
-    func expiredRecordYieldsOverwriteTicket() async throws {
-        // Covered via the stub (a FirestoreInboxStore needs a live Firestore).
-        let store = StubInboxStore()
-        await store.seedProcessed(id: "slot", expiresAt: Date(timeIntervalSince1970: 0))
-
-        let reservation = try await store.reserve(id: "slot")
-
-        guard case .proceed(let ticket) = reservation else {
-            Issue.record("Expected proceed, got \(reservation)")
-            return
-        }
-        #expect(ticket.overwriteExpired)
-    }
-
-    // MARK: - Record id derivation
-
-    @Test("record id is deterministic and differs per consumer and per event")
-    func recordIdDerivation() {
-        let event = UUID()
-        let a = InboxRecordId.derive(consumer: "A", eventId: event)
-        #expect(a == InboxRecordId.derive(consumer: "A", eventId: event))
-        #expect(a != InboxRecordId.derive(consumer: "B", eventId: event))
-        #expect(a != InboxRecordId.derive(consumer: "A", eventId: UUID()))
-        #expect(a.count == 64)  // hex SHA-256, path-safe
     }
 }

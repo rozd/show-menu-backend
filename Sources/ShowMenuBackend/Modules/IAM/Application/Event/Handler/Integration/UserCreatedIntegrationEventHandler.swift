@@ -2,7 +2,7 @@ import Foundation
 import Logging
 
 /// Integration event handler that creates a local `User` record when
-/// `UserCreatedIntegrationEvent` is received from Firebase Auth.
+/// `UserCreatedIntegrationEvent` is received.
 ///
 /// Naming pattern: `{Action}On{IntegrationEvent}Handler` — here, the action
 /// (`UserCreated`) and event share the lifecycle name, so this is collapsed
@@ -23,8 +23,7 @@ struct UserCreatedIntegrationEventHandler: IntegrationEventHandler {
             payload: .init(
                 userId: event.userId,
                 email: event.email,
-                displayName: event.displayName,
-                photoURL: event.photoURL
+                displayName: event.displayName
             ),
             metadata: CommandMetadata(
                 correlationId: event.metadata.correlationId ?? TraceID()

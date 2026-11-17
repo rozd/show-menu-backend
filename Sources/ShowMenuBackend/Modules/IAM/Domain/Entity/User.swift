@@ -11,71 +11,45 @@ final class User: AggregateRoot, @unchecked Sendable {
     var version: Version = .none
 
     private(set) var email: String?
-    private(set) var name: String?
-    private(set) var avatarURL: String?
-    /// Ids of the accounts this user belongs to (`users/{uid}.accounts`, read by Flutter).
-    private(set) var accounts: [String]
-    /// Template-only moderation flag. Not part of Node's schema: persisted only when `true`.
+    private(set) var phone: String?
+    private(set) var username: String?
+    private(set) var displayName: String?
+    private(set) var photoURL: String?
+    private(set) var emailVerified: Bool
+    private(set) var phoneVerified: Bool
     private(set) var disabled: Bool
-    private(set) var createdAt: Date
-    private(set) var updatedAt: Date
+    /// Coarse-grained authorization roles held by this user, resolved into
+    /// `Principal.roles` at the request boundary. Empty for a fresh account;
+    /// concrete values (e.g. `.admin`) are assigned out of band.
+    private(set) var roles: Set<Role>
+    private(set) var createdAt: Date?
 
     init(
         id: User.Id,
         email: String? = nil,
-        name: String? = nil,
-        avatarURL: String? = nil,
-        accounts: [String] = [],
+        phone: String? = nil,
+        username: String? = nil,
+        displayName: String? = nil,
+        photoURL: String? = nil,
+        emailVerified: Bool = false,
+        phoneVerified: Bool = false,
         disabled: Bool = false,
+        roles: Set<Role> = [],
         version: Version = .none,
-        createdAt: Date = .now,
-        updatedAt: Date? = nil
+        createdAt: Date? = .now
     ) {
         self.id = id
         self.email = email
-        self.name = name
-        self.avatarURL = avatarURL
-        self.accounts = accounts
+        self.phone = phone
+        self.username = username
+        self.displayName = displayName
+        self.photoURL = photoURL
+        self.emailVerified = emailVerified
+        self.phoneVerified = phoneVerified
         self.disabled = disabled
+        self.roles = roles
         self.version = version
         self.createdAt = createdAt
-        self.updatedAt = updatedAt ?? createdAt
-    }
-
-    /// Whether this is a bare profile: no email, name or avatar. That is what
-    /// `UserLinkAccountUseCase` creates when the account-created event overtakes
-    /// the user-created one (such a user has never been onboarded).
-    var isBareProfile: Bool {
-        email == nil && name == nil && avatarURL == nil
-    }
-
-    /// Fills the profile of a bare profile from the Auth user. Returns whether
-    /// anything changed. Never overwrites existing data and never touches `accounts`.
-    @discardableResult
-    func completeProfile(email: String?, name: String?, avatarURL: String?, now: Date = .now) -> Bool {
-        guard isBareProfile, email != nil || name != nil || avatarURL != nil else { return false }
-        self.email = email
-        self.name = name
-        self.avatarURL = avatarURL
-        updatedAt = now
-        return true
-    }
-
-    /// Links an account to this user. Idempotent: a duplicate is a no-op (no event,
-    /// `updatedAt` kept). Records the semantic `user.account.added` event.
-    func addAccount(_ accountId: String, now: Date = .now) {
-        guard !accounts.contains(accountId) else { return }
-        accounts.append(accountId)
-        updatedAt = now
-        record(event: .accountAdded(aggregateId: id))
-    }
-
-    /// Unlinks an account. Idempotent: an absent account is a no-op.
-    func removeAccount(_ accountId: String, now: Date = .now) {
-        guard accounts.contains(accountId) else { return }
-        accounts.removeAll { $0 == accountId }
-        updatedAt = now
-        record(event: .accountRemoved(aggregateId: id))
     }
 }
 

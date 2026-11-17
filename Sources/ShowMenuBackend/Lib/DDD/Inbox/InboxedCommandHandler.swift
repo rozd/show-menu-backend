@@ -7,14 +7,8 @@
 
 import Foundation
 
-/// What a handler needs to be inbox-deduplicating. Bundled so an inboxed
-/// handler grows by exactly one stored property.
-///
-/// There is deliberately no per-handler ``InboxConfiguration`` here: the only
-/// policy (retention TTL) is a property of the *store*, so it is applied once,
-/// where the store factory is built (`CompositionRoot.inboxStoreFactory` reads
-/// the app-level `inboxConfiguration`). A second copy here could silently
-/// disagree with the one the store actually uses.
+/// Store factory + policy a handler needs to be inbox-deduplicating. Bundled so
+/// an inboxed handler grows by exactly one stored property.
 struct InboxComponents: Sendable {
 
     /// Builds an ``InboxStore`` bound to the *same* `UnitOfWorkContext`
@@ -22,8 +16,14 @@ struct InboxComponents: Sendable {
     /// a repository resolves its data source from `ctx.transaction`.
     let storeFactory: InboxStoreFactory
 
-    init(storeFactory: @escaping InboxStoreFactory) {
+    let configuration: InboxConfiguration
+
+    init(
+        storeFactory: @escaping InboxStoreFactory,
+        configuration: InboxConfiguration = .default
+    ) {
         self.storeFactory = storeFactory
+        self.configuration = configuration
     }
 }
 
@@ -46,16 +46,13 @@ struct InboxComponents: Sendable {
 ///
 /// **Concurrent duplicate semantics:** when two deliveries of the same event
 /// race, both probe an empty slot and run the work, but only one `create` can
-/// satisfy the `exists == false` precondition, which Firestore enforces at
-/// commit. The loser's commit fails, and the Firestore transaction runner
-/// retries the whole closure (it retries any error, with backoff, up to its
-/// attempt limit). On the retry `reserve` sees the winner's committed marker
-/// and returns `.alreadyProcessed`, so the loser skips silently and the
-/// transaction commits with no writes. The winner did the work, so this is
-/// correct by outcome. Only if the commit conflict persists through every
-/// attempt does an error escape (a mapped `FirestoreError`, logged and swallowed
-/// by the dispatcher). A later redelivery observes the committed marker and
-/// skips cleanly.
+/// satisfy the uniqueness precondition — the loser's whole transaction aborts
+/// (as `InboxError.duplicateEvent` under Fluent, or the store's own conflict
+/// error where the precondition is validated at commit). The error surfaces out
+/// of ``handle(_:)`` into the dispatcher, which logs and swallows it — correct,
+/// because the winner committed the work; on the queue path this also means no
+/// job retry for the loser, by design. A later redelivery observes the committed
+/// marker and skips cleanly.
 protocol InboxedCommandHandler: CommandHandler where Result == Void {
 
     var inbox: InboxComponents { get }

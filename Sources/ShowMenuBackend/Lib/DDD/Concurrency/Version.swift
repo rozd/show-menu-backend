@@ -12,9 +12,8 @@
 /// HTTP `ETag`) — but domain code never inspects or hand-increments it. Each
 /// persistence store binds the token to a native mechanism and owns advancing it:
 ///
-/// - **A monotonic integer counter** — what the Firestore adapter uses today (an
-///   integer `version` document field) and what a SQL store would bind to a
-///   `version` column (see ``VersionedModel``).
+/// - **A monotonic integer counter** — what the Fluent adapter uses today and
+///   what a SQL store would bind to a `version` column (see ``VersionedModel``).
 /// - **A store-native token** — a row timestamp, an `xmin` system column, a
 ///   document `updateTime` — could be bound instead without touching the domain.
 ///

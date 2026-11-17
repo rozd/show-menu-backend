@@ -1,7 +1,5 @@
 import Vapor
 
-/// Every HTTP route is an operation in the OpenAPI contract (`show-menu-contracts`), served by
-/// the generated `registerHandlers` through `ContractAPI`. Do not add routes here.
 func routes(_ app: Application) throws {
-    try app.registerContractHandlers()
+    // HTTP routes come from the OpenAPI contract (next commit); Passage mounts /auth/* itself.
 }

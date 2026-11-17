@@ -67,7 +67,7 @@ Operation:  pure cross-aggregate decision / coordinated mutation (no I/O)
 ## Before / after
 
 > The types below (`Account`, `Money`, `TransferError`) are **illustrative only** —
-> they are not part of this template. They show the shape of the refactor, not code
+> they are not part of this repo. They show the shape of the refactor, not code
 > to add.
 
 ### Before — cross-aggregate logic living inside the UseCase
@@ -149,7 +149,7 @@ func execute(params: Params) async throws -> Void {
 ```
 
 The cross-aggregate invariants are now unit-testable in isolation — pure inputs, no
-Firestore, no `UnitOfWork`.
+store, no `UnitOfWork`.
 
 ## Related conventions
 

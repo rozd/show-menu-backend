@@ -1,2 +1,0 @@
-protocol AccountDataSource: QueryableDataSource<AccountModel> {
-}

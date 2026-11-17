@@ -1,6 +1,4 @@
-import FirestoreAPI
-import GRPCCore
-import GRPCNIOTransportHTTP2
+import Fluent
 import Vapor
 
 typealias UseCaseFactory<T> = @Sendable (_ ctx: any UnitOfWorkContext) -> T
@@ -48,49 +46,25 @@ extension Application {
 
         var idempotencyStoreFactory: IdempotencyStoreFactory { get }
 
-        // Inbox (idempotent consumer)
+        // Inbox (consumer-side de-duplication)
 
         var inboxConfiguration: InboxConfiguration { get }
 
         var inboxStoreFactory: InboxStoreFactory { get }
 
-        // GCP
+        // Store
 
-        var config: GoogleCloudPlatform.Configuration { get }
+        /// The SQL database backing every repository, query handler, the outbox
+        /// and the idempotency store. Registered in code by
+        /// `configureFluentStore(_:)`, which `configure(_:)` calls (see
+        /// `App/Fluent+Vapor.swift`).
+        var appDatabase: any Database { get }
 
-        var authProvider: any GCPAuthProvider { get }
+        /// The non-transactional store handle query handlers read through, and the
+        /// outbox relay drains through. Type-erased so the Application layer names
+        /// no adapter type.
+        var directTransaction: any Sendable { get }
 
-        var firestore: Firestore<HTTP2ClientTransport.Posix> { get }
-
-        // MARK: Catalog
-
-        var featureMapper: FeatureMapper { get }
-        var featureDataSourceFactory: DataSourceFactory<FeatureModel> { get }
-        var featureRepositoryFactory: RepositoryFactory<any FeatureRepository> { get }
-        var createFeatureUseCaseFactory: UseCaseFactory<CreateFeatureUseCase> { get }
-        var updateFeatureUseCaseFactory: UseCaseFactory<UpdateFeatureUseCase> { get }
-        var createFeatureCommandHandler: CreateFeatureCommandHandler { get }
-        var updateFeatureCommandHandler: UpdateFeatureCommandHandler { get }
-        var planMapper: PlanMapper { get }
-        var planDataSourceFactory: DataSourceFactory<PlanModel> { get }
-        var planSKUDataSourceFactory: DataSourceFactory<PlanSKUModel> { get }
-        var planRepositoryFactory: RepositoryFactory<any PlanRepository> { get }
-        var createPlanUseCaseFactory: UseCaseFactory<CreatePlanUseCase> { get }
-        var createPlanCommandHandler: CreatePlanCommandHandler { get }
-        var updatePlanUseCaseFactory: UseCaseFactory<UpdatePlanUseCase> { get }
-        var activatePlanUseCaseFactory: UseCaseFactory<ActivatePlanUseCase> { get }
-        var deactivatePlanUseCaseFactory: UseCaseFactory<DeactivatePlanUseCase> { get }
-        var addPlanFeatureUseCaseFactory: UseCaseFactory<AddPlanFeatureUseCase> { get }
-        var removePlanFeatureUseCaseFactory: UseCaseFactory<RemovePlanFeatureUseCase> { get }
-        var updatePlanCommandHandler: UpdatePlanCommandHandler { get }
-        var activatePlanCommandHandler: ActivatePlanCommandHandler { get }
-        var deactivatePlanCommandHandler: DeactivatePlanCommandHandler { get }
-        var addPlanFeatureCommandHandler: AddPlanFeatureCommandHandler { get }
-        var removePlanFeatureCommandHandler: RemovePlanFeatureCommandHandler { get }
-        var getPlanQueryHandler: GetPlanQueryHandler { get }
-        var listPlansQueryHandler: ListPlansQueryHandler { get }
-
-        // USER_LIFECYCLE_BEGIN
         // MARK: IAM
 
         var userMapper: UserMapper { get }
@@ -104,59 +78,6 @@ extension Application {
         var deleteUserAccountCommandHandler: DeleteUserAccountCommandHandler { get }
         var userCreatedIntegrationEventHandler: UserCreatedIntegrationEventHandler { get }
         var userDeletedIntegrationEventHandler: UserDeletedIntegrationEventHandler { get }
-        // USER_LIFECYCLE_END
-
-        // MARK: IAM — account linking (S08)
-
-        var userLinkAccountUseCaseFactory: UseCaseFactory<UserLinkAccountUseCase> { get }
-        var linkAccountToCreatorCommandHandler: LinkAccountToCreatorCommandHandler { get }
-        var linkAccountOnAccountCreatedHandler: LinkAccountOnAccountCreatedHandler { get }
-
-        // MARK: Accounts
-
-        var accountMapper: AccountMapper { get }
-        var accountDataSourceFactory: DataSourceFactory<AccountModel> { get }
-        var accountPermissionStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any AccountPermissionStore { get }
-        var grantAccountOwnerPermissionUseCaseFactory: UseCaseFactory<GrantAccountOwnerPermissionUseCase> { get }
-        var grantAccountOwnerPermissionCommandHandler: GrantAccountOwnerPermissionCommandHandler { get }
-        var grantOwnerPermissionOnAccountCreatedHandler: GrantOwnerPermissionOnAccountCreatedHandler { get }
-
-        // MARK: Purchases
-
-        var paymentGateway: any PaymentGateway { get }
-        var orderMapper: OrderMapper { get }
-        var invoiceMapper: InvoiceMapper { get }
-        var checkoutSessionMapper: CheckoutSessionMapper { get }
-        var orderDataSourceFactory: DataSourceFactory<OrderModel> { get }
-        var invoiceDataSourceFactory: DataSourceFactory<InvoiceModel> { get }
-        var checkoutSessionDataSourceFactory: DataSourceFactory<CheckoutSessionModel> { get }
-        var orderRepositoryFactory: RepositoryFactory<any OrderRepository> { get }
-        var invoiceRepositoryFactory: RepositoryFactory<any InvoiceRepository> { get }
-        var checkoutLockDataSourceFactory: DataSourceFactory<CheckoutLockModel> { get }
-        var purchaseSubscriptionUseCaseFactory: UseCaseFactory<PurchaseSubscriptionUseCase> { get }
-        var purchaseSubscriptionCommandHandler: PurchaseSubscriptionCommandHandler { get }
-        var checkoutInitiator: CheckoutInitiator { get }
-        var purchaseSubscriptionFlow: PurchaseSubscriptionFlow { get }
-        var cancelPurchaseUseCaseFactory: UseCaseFactory<CancelPurchaseUseCase> { get }
-        var cancelPurchaseCommandHandler: CancelPurchaseCommandHandler { get }
-        var invoiceStatusAuditStoreFactory: @Sendable (_ ctx: any UnitOfWorkContext) -> any InvoiceStatusAuditStore { get }
-        var handleLiqPayCallbackUseCaseFactory: UseCaseFactory<HandleLiqPayCallbackUseCase> { get }
-        var handleLiqPayCallbackCommandHandler: HandleLiqPayCallbackCommandHandler { get }
-
-        // MARK: Subscriptions
-
-        var subscriptionMapper: SubscriptionMapper { get }
-        var subscriptionDataSourceFactory: DataSourceFactory<SubscriptionModel> { get }
-        var subscriptionRepositoryFactory: RepositoryFactory<any SubscriptionRepository> { get }
-        var activateSubscriptionUseCaseFactory: UseCaseFactory<ActivateSubscriptionUseCase> { get }
-        var suspendSubscriptionUseCaseFactory: UseCaseFactory<SuspendSubscriptionUseCase> { get }
-        var cancelSubscriptionUseCaseFactory: UseCaseFactory<CancelSubscriptionUseCase> { get }
-        var subscriptionInvoiceEventHandler: SubscriptionInvoiceEventHandler { get }
-        var expiringSubscriptionSource: any ExpiringSubscriptionSource { get }
-        var paidInvoiceSource: any PaidInvoiceSource { get }
-        var expireSubscriptionUseCaseFactory: UseCaseFactory<ExpireSubscriptionUseCase> { get }
-        var reconcileSubscriptionUseCaseFactory: UseCaseFactory<ReconcileSubscriptionUseCase> { get }
-        var checkExpiredSubscriptionsJob: CheckExpiredSubscriptionsJob { get }
     }
 
     // MARK: - CompositionRoot
@@ -179,23 +100,31 @@ extension Application {
             }
         }
 
-        // GCP
+        // Store
 
-        var config: GoogleCloudPlatform.Configuration {
-            resolver.resolve(\.config) {
-                app.gcp.config
+        /// Resolved once, so the whole process shares a single store handle.
+        ///
+        /// The database is *registered* by ``configureFluentStore(_:)``, not
+        /// here: registration and migrations are boot-time side effects that
+        /// cannot happen lazily inside a dependency factory, so this only looks
+        /// the finished handle up. An `Application` that never ran it has no
+        /// store at all — unit tests either override this dependency or use
+        /// doubles, and the `preconditionFailure` says which call is missing
+        /// rather than handing back a silently empty database.
+        var appDatabase: any Database {
+            resolver.resolve(\.appDatabase) {
+                guard app.databases.ids().contains(.app) else {
+                    preconditionFailure(
+                        "No store: call `try await configureFluentStore(app)` (as `configure(_:)` does) before touching `app.deps`."
+                    )
+                }
+                return app.db(.app)
             }
         }
 
-        var authProvider: any GCPAuthProvider {
-            resolver.resolve(\.authProvider) {
-                app.gcp.authProvider
-            }
-        }
-
-        var firestore: Firestore<HTTP2ClientTransport.Posix> {
-            resolver.resolve(\.firestore) {
-                .create(with: config, using: authProvider)
+        var directTransaction: any Sendable {
+            resolver.resolve(\.directTransaction) {
+                FluentTransaction.direct(database: appDatabase)
             }
         }
 
@@ -209,13 +138,13 @@ extension Application {
 
         var integrationEventDispatcher: any IntegrationEventDispatcher {
             resolver.resolve(\.integrationEventDispatcher) {
-                InMemoryIntegrationEventDispatcher(logger: app.logger)
+                InProcessIntegrationEventDispatcher(logger: app.logger)
             }
         }
 
         var integrationEventChannel: any IntegrationEventChannel {
             resolver.resolve(\.integrationEventChannel) {
-                InMemoryIntegrationEventChannel(
+                InProcessIntegrationEventChannel(
                     dispatcher: integrationEventDispatcher,
                     logger: app.logger,
                 )
@@ -224,7 +153,7 @@ extension Application {
 
         var domainEventDispatcher: any DomainEventDispatcher {
             resolver.resolve(\.domainEventDispatcher) {
-                InMemoryDomainEventDispatcher(logger: app.logger)
+                InProcessDomainEventDispatcher(logger: app.logger)
             }
         }
 
@@ -237,15 +166,15 @@ extension Application {
         var outboxRelay: OutboxRelay {
             resolver.resolve(\.outboxRelay) {
                 // The relay reads/marks/prunes outside any command transaction,
-                // so it binds a *direct* (non-transactional) Firestore store, and
-                // publishes through the existing integration-event channel.
-                let store = FirestoreOutboxStore(
-                    transaction: .direct(firestore: firestore),
-                    collection: outbox.collection,
+                // so it binds a *direct* (non-transactional) store, and publishes
+                // through the existing integration-event channel.
+                let outboxStore = FluentOutboxStore(
+                    transaction: .direct(database: appDatabase),
+                    table: outbox.collection,
                     logger: app.logger
                 )
                 return outbox.relay(
-                    store: store,
+                    store: outboxStore,
                     channel: integrationEventChannel,
                     logger: app.logger
                 )
@@ -254,8 +183,8 @@ extension Application {
 
         var unitOfWork: any UnitOfWork {
             resolver.resolve(\.unitOfWork) {
-                FirestoreTransactionUnitOfWork(
-                    firestore: firestore,
+                FluentUnitOfWork(
+                    database: appDatabase,
                     dispatcher: self.domainEventDispatcher,
                     outbox: outbox,
                     logger: app.logger
@@ -273,19 +202,15 @@ extension Application {
 
         var idempotencyStoreFactory: IdempotencyStoreFactory {
             resolver.resolve(\.idempotencyStoreFactory) {
-                let path = firestorePrefix(FirestoreIdempotencyStore.defaultCollection)
                 let ttl = idempotencyConfiguration.ttl
                 return { [logger = app.logger] ctx in
-                    // Sibling force-cast pattern in CompositionRoot+Catalog.swift / +IAM.swift;
-                    // the Firestore idempotency store requires the production FirestoreTransaction.
-                    guard let txn = ctx.transaction as? FirestoreTransaction else {
+                    guard let txn = ctx.transaction as? FluentTransaction else {
                         preconditionFailure(
-                            "FirestoreIdempotencyStore requires a FirestoreTransaction, but received \(type(of: ctx.transaction)); the idempotency store must run inside FirestoreTransactionUnitOfWork."
+                            "FluentIdempotencyStore requires a FluentTransaction, but received \(type(of: ctx.transaction)); the idempotency store must run inside FluentUnitOfWork."
                         )
                     }
-                    return FirestoreIdempotencyStore(
+                    return FluentIdempotencyStore(
                         transaction: txn,
-                        collectionPath: path,
                         ttl: ttl,
                         logger: logger
                     )
@@ -293,7 +218,7 @@ extension Application {
             }
         }
 
-        // Inbox (idempotent consumer)
+        // Inbox (consumer-side de-duplication)
 
         var inboxConfiguration: InboxConfiguration {
             resolver.resolve(\.inboxConfiguration) {
@@ -303,17 +228,15 @@ extension Application {
 
         var inboxStoreFactory: InboxStoreFactory {
             resolver.resolve(\.inboxStoreFactory) {
-                let path = firestorePrefix(FirestoreInboxStore.defaultCollection)
                 let ttl = inboxConfiguration.ttl
                 return { [logger = app.logger] ctx in
-                    guard let txn = ctx.transaction as? FirestoreTransaction else {
+                    guard let txn = ctx.transaction as? FluentTransaction else {
                         preconditionFailure(
-                            "FirestoreInboxStore requires a FirestoreTransaction, but received \(type(of: ctx.transaction)); the inbox store must run inside FirestoreTransactionUnitOfWork."
+                            "FluentInboxStore requires a FluentTransaction, but received \(type(of: ctx.transaction)); the inbox store must run inside FluentUnitOfWork."
                         )
                     }
-                    return FirestoreInboxStore(
+                    return FluentInboxStore(
                         transaction: txn,
-                        collectionPath: path,
                         ttl: ttl,
                         logger: logger
                     )
@@ -356,7 +279,10 @@ extension Application.CompositionRoot {
             lock.lock()
             defer { lock.unlock() }
 
-            if let cached = persistent[keyPath] as? T {
+            // `flatMap` before the cast, for the reason spelled out in `Partial`:
+            // a marker-protocol `T` (`any Sendable`) makes `as?` unconditional, so
+            // an absent entry would "hit" the cache and return a boxed `nil`.
+            if let cached = persistent[keyPath].flatMap({ $0 as? T }) {
                 return cached
             }
 

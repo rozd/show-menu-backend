@@ -14,7 +14,7 @@ protocol DomainEventCollector: Sendable {
 
 // MARK: - Default Implementation
 
-actor InMemoryDomainEventCollector: DomainEventCollector {
+actor InProcessDomainEventCollector: DomainEventCollector {
     private var events: [any DomainEvent] = []
 
     func capture<T: DomainEvent>(_ event: T) async {

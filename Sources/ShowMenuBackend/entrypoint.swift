@@ -7,25 +7,13 @@ public enum ShowMenuBackend {
     public static func main() async throws {
         var env = try Environment.detect()
 
-        if Environment.isRunningInCloudRun {
-            let projectId = try Environment.gcpProjectId
-            let metadataProvider = Logger.MetadataProvider {
-                guard let traceId = RequestContext.traceId else { return [:] }
-                return ["gcp/trace": .string("projects/\(projectId)/traces/\(traceId.rawValue)")]
-            }
-            LoggingSystem.bootstrap(
-                { label, metadataProvider in
-                    GoogleCloudPlatformLogHandler(label: label, metadataProvider: metadataProvider)
-                },
-                metadataProvider: metadataProvider
-            )
-        } else {
-            try LoggingSystem.bootstrap(from: &env)
-        }
+        try LoggingSystem.bootstrap(from: &env)
 
         let app = try await Application.make(env)
 
-        app.middleware.use(try GoogleCloudPlatformTraceMiddleware.initFromEnvironment(), at: .beginning)
+        // Populate RequestContext.traceId at the very edge, so every log line and
+        // every command/event raised downstream can be correlated to one request.
+        app.middleware.use(TraceMiddleware(), at: .beginning)
 
         // This attempts to install NIO as the Swift Concurrency global executor.
         // You can enable it if you'd like to reduce the amount of context switching between NIO and Swift Concurrency.

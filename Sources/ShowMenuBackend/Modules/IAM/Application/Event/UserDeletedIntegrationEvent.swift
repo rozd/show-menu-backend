@@ -1,10 +1,11 @@
 import Foundation
 
-/// Integration event published when a Firebase Auth user is deleted.
+/// Integration event announcing that a user account was removed upstream.
 ///
-/// Published by `EventarcController.handleUserDeleted()` upon receiving
-/// a `google.firebase.auth.user.v1.deleted` CloudEvent forwarded by the
-/// auth-forwarder Cloud Function. Consumed by `UserDeletedIntegrationEventHandler`.
+/// Consumed by `UserDeletedIntegrationEventHandler`, which removes the local
+/// `User` record. As with `UserCreatedIntegrationEvent`, it originates
+/// **in-process** in this template; a real deployment would receive it from the
+/// owning service over a message bus.
 struct UserDeletedIntegrationEvent: IntegrationEvent {
     static let kind: String = "users.deleted"
 

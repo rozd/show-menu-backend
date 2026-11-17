@@ -12,12 +12,13 @@ extension Application.CompositionRoot {
 
     // MARK: IAM — Data Sources
 
+    /// **Store binding** — the Fluent adapter. The first argument (a collection
+    /// path) is unused: the table is fixed by the model's `FluentDataSource.table`.
     var userDataSourceFactory: DataSourceFactory<UserModel> {
         resolver.resolve(\.userDataSourceFactory) {
-            { [logger = app.logger] prefix, transaction in
-                FirestoreUserDataSource(
-                    transaction: transaction as! FirestoreTransaction,
-                    prefix: firestorePrefix(prefix),
+            { [logger = app.logger] _, transaction in
+                FluentUserDataSource(
+                    transaction: transaction as! FluentTransaction,
                     logger: logger
                 )
             }
@@ -29,7 +30,7 @@ extension Application.CompositionRoot {
     var userRepositoryFactory: RepositoryFactory<any UserRepository> {
         resolver.resolve(\.userRepositoryFactory) {
             { ctx in
-                FirestoreUserRepository(
+                DefaultUserRepository(
                     mapper: userMapper,
                     dataSourceFactory: userDataSourceFactory,
                     context: ctx
@@ -71,7 +72,7 @@ extension Application.CompositionRoot {
         resolver.resolve(\.getUserQueryHandler) {
             GetUserQueryHandler(
                 dataSourceFactory: userDataSourceFactory,
-                transaction: .direct(firestore: firestore),
+                transaction: directTransaction,
                 mapper: userMapper,
                 logger: app.logger
             )
@@ -82,7 +83,7 @@ extension Application.CompositionRoot {
         resolver.resolve(\.findUserQueryHandler) {
             FindUserQueryHandler(
                 dataSourceFactory: userDataSourceFactory,
-                transaction: .direct(firestore: firestore),
+                transaction: directTransaction,
                 mapper: userMapper,
                 logger: app.logger
             )
@@ -96,7 +97,7 @@ extension Application.CompositionRoot {
             CreateUserAccountCommandHandler(
                 unitOfWork: unitOfWork,
                 useCaseFactory: userOnboardUseCaseFactory,
-                inbox: InboxComponents(storeFactory: inboxStoreFactory),
+                inbox: InboxComponents(storeFactory: inboxStoreFactory, configuration: inboxConfiguration),
                 logger: app.logger
             )
         }
@@ -107,7 +108,7 @@ extension Application.CompositionRoot {
             DeleteUserAccountCommandHandler(
                 unitOfWork: unitOfWork,
                 useCaseFactory: userRemoveUseCaseFactory,
-                inbox: InboxComponents(storeFactory: inboxStoreFactory),
+                inbox: InboxComponents(storeFactory: inboxStoreFactory, configuration: inboxConfiguration),
                 logger: app.logger
             )
         }
@@ -128,42 +129,6 @@ extension Application.CompositionRoot {
         resolver.resolve(\.userDeletedIntegrationEventHandler) {
             UserDeletedIntegrationEventHandler(
                 commandHandler: deleteUserAccountCommandHandler,
-                logger: app.logger
-            )
-        }
-    }
-
-    // MARK: IAM — account linking (S08)
-
-    var userLinkAccountUseCaseFactory: UseCaseFactory<UserLinkAccountUseCase> {
-        resolver.resolve(\.userLinkAccountUseCaseFactory) {
-            { [logger = app.logger] ctx in
-                UserLinkAccountUseCase(
-                    context: ctx,
-                    accountDataSourceFactory: accountDataSourceFactory,
-                    accountMapper: accountMapper,
-                    repositoryFactory: userRepositoryFactory,
-                    logger: logger
-                )
-            }
-        }
-    }
-
-    var linkAccountToCreatorCommandHandler: LinkAccountToCreatorCommandHandler {
-        resolver.resolve(\.linkAccountToCreatorCommandHandler) {
-            LinkAccountToCreatorCommandHandler(
-                unitOfWork: unitOfWork,
-                useCaseFactory: userLinkAccountUseCaseFactory,
-                inbox: InboxComponents(storeFactory: inboxStoreFactory),
-                logger: app.logger
-            )
-        }
-    }
-
-    var linkAccountOnAccountCreatedHandler: LinkAccountOnAccountCreatedHandler {
-        resolver.resolve(\.linkAccountOnAccountCreatedHandler) {
-            LinkAccountOnAccountCreatedHandler(
-                commandHandler: linkAccountToCreatorCommandHandler,
                 logger: app.logger
             )
         }

@@ -11,10 +11,11 @@ import Foundation
 
 /// Lifecycle of an idempotency record.
 ///
-/// In the single-transaction Firestore binding only `.completed` is ever
-/// committed (the record and the work commit together). `.inProgress` is part of
-/// the protocol so the store stays binding-agnostic — a two-phase / SQL store, or
-/// a crash remnant, can leave an in-progress marker that a later probe rejects.
+/// In a single-transaction binding (the shipped one) only `.completed` is ever
+/// committed — the record and the work commit together, so there is no window in
+/// which a half-finished marker is visible. `.inProgress` is part of the protocol
+/// so the store stays binding-agnostic — a two-phase store, or a crash remnant,
+/// can leave an in-progress marker that a later probe rejects.
 enum IdempotencyStatus: String, Sendable, Codable {
     case inProgress
     case completed
@@ -71,8 +72,9 @@ struct IdempotencyRecord: Sendable, Equatable {
 
 /// The result of the store's read-phase probe (``IdempotencyStore/reserve``).
 ///
-/// The probe never writes — Firestore forbids reads after writes, so the record
-/// is only persisted later by ``IdempotencyStore/complete`` (write phase). When
+/// The probe never writes — the contract is strictly read-then-write (see
+/// ``IdempotencyStore``), so the record is only persisted later by
+/// ``IdempotencyStore/complete`` (write phase). When
 /// the caller should proceed, it receives an opaque ``IdempotencyTicket`` to hand
 /// back to `complete`, so the store need not be told the key/fingerprint twice.
 enum IdempotencyReservation: Sendable {

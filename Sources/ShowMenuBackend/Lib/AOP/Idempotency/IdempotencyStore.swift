@@ -14,9 +14,12 @@ typealias IdempotencyStoreFactory = @Sendable (_ ctx: any UnitOfWorkContext) -> 
 ///
 /// **Why two methods instead of one `reserve+run+store`:** the store must enlist
 /// in the *same* transaction as the command's writes (so the record and the work
-/// commit or roll back atomically). The production binding is Firestore, whose
-/// transactions forbid reads after writes — so the probe (read) and the persist
-/// (write) cannot be a single interleaved call. The decorator therefore drives:
+/// commit or roll back atomically) — and a single interleaved call would have to
+/// read *after* the work has already written. Many document stores forbid exactly
+/// that (a transaction buffers its writes and rejects a subsequent read), so the
+/// contract is deliberately split into a read phase and a write phase, keeping it
+/// bindable on the strictest store rather than only the most permissive one. The
+/// caller therefore drives:
 ///
 /// ```text
 ///   reserve(...)        // READ phase — runs before any write
@@ -29,7 +32,7 @@ typealias IdempotencyStoreFactory = @Sendable (_ ctx: any UnitOfWorkContext) -> 
 /// ```
 ///
 /// Implementations bind these to a transaction supplied at construction (e.g.
-/// `FirestoreIdempotencyStore` over `ctx.transaction`). The in-flight guard for
+/// `FluentIdempotencyStore` over `ctx.transaction`). The in-flight guard for
 /// the *new-key* race is a transactional `create` with a uniqueness precondition,
 /// enforced atomically at commit.
 protocol IdempotencyStore: Sendable {

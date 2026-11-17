@@ -49,7 +49,7 @@ private final class SpyCommandHandler: IdempotentCommandHandler, @unchecked Send
 // MARK: - Fixtures for the overridable `fingerprint(for:)` hook
 
 /// A command carrying identity *outside* its payload (mirrors how
-/// `UpdateFeatureCommand.featureId` is a route parameter, not a payload field).
+/// `UpdateItemCommand.itemId` is a route parameter, not a payload field).
 private struct ScopedCommand: Command {
     struct Payload: Codable, Sendable, Equatable {
         let value: String
@@ -100,7 +100,7 @@ struct IdempotentCommandHandlerTests {
     private let configuration = IdempotencyConfiguration.default
 
     private func makeSUT(
-        store: InMemoryIdempotencyStore
+        store: StubIdempotencyStore
     ) -> SpyCommandHandler {
         SpyCommandHandler(
             idempotency: IdempotencyComponents(
@@ -127,7 +127,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("new key runs the work once and stores the response")
     func newKeyRunsOnceAndStores() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
 
         let result = try await RequestContext.$idempotencyKey.withValue(try IdempotencyKey("k-new")) {
@@ -144,7 +144,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("completed duplicate replays the stored response without re-running")
     func completedDuplicateReplays() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
         let key = try IdempotencyKey("k-dup")
 
@@ -164,7 +164,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("in-flight duplicate is rejected and the work is not run")
     func inFlightDuplicateRejected() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
         let key = try IdempotencyKey("k-inflight")
         let id = try recordId(forKey: key.rawValue)
@@ -183,7 +183,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("same key with a different body is rejected as a fingerprint mismatch")
     func sameKeyDifferentBodyRejected() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
         let key = try IdempotencyKey("k-mismatch")
         let id = try recordId(forKey: key.rawValue)
@@ -207,7 +207,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("request without an Idempotency-Key runs normally and stores nothing")
     func noKeyPassesThrough() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
 
         // No RequestContext.idempotencyKey set.
@@ -222,7 +222,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("expired record is treated as absent and the work runs again")
     func expiredRecordReExecutes() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = makeSUT(store: store)
         let key = try IdempotencyKey("k-expired")
         let id = try recordId(forKey: key.rawValue)
@@ -256,7 +256,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("overridden fingerprint rejects the same key reused against a different resource")
     func overriddenFingerprintRejectsDifferentResource() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = ScopedHandler(idempotency: IdempotencyComponents(
             storeFactory: { _ in store },
             configuration: configuration
@@ -286,7 +286,7 @@ struct IdempotentCommandHandlerTests {
 
     @Test("overridden fingerprint replays when the same resource is retried")
     func overriddenFingerprintReplaysSameResource() async throws {
-        let store = InMemoryIdempotencyStore()
+        let store = StubIdempotencyStore()
         let sut = ScopedHandler(idempotency: IdempotencyComponents(
             storeFactory: { _ in store },
             configuration: configuration
