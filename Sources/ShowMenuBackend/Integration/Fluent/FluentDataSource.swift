@@ -55,7 +55,7 @@ protocol FluentDataSource<Model>: QueryableDataSource where Model: Codable & Sen
 extension FluentDataSource {
 
     /// The primary-key column. Fixed, matching the `id` coding key every store
-    /// model in this template carries.
+    /// model in this app carries.
     var idColumn: String { "id" }
 
     var sql: any SQLDatabase {

@@ -12,7 +12,7 @@
 /// It holds the administrator role so such flows pass *through* the normal
 /// authorization rules rather than bypassing them. In a multi-module system this
 /// would live in a shared identity area; it sits in IAM here because IAM is the
-/// only module wiring authorization in this template.
+/// only module wiring authorization in this app.
 struct SystemPrincipal: Principal {
     let id: String
     let roles: Set<Role>

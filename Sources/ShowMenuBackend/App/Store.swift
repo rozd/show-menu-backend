@@ -13,6 +13,10 @@ enum StoreConfigurationError: Error, CustomStringConvertible {
     /// Postgres connection details were half-supplied.
     case missingConnectionDetails
 
+    /// Production boot with neither `DATABASE_URL` nor `DATABASE_HOST`: the in-memory
+    /// SQLite fallback is development/testing only.
+    case missingProductionDatabase
+
     /// `Outbox.collection` was changed away from the table the Fluent adapter's
     /// migration creates. A Fluent model's table name is static, so the two would
     /// silently address different tables.
@@ -25,6 +29,12 @@ enum StoreConfigurationError: Error, CustomStringConvertible {
                 DATABASE_HOST is set but DATABASE_USERNAME is not. Supply the rest of the \
                 Postgres connection details (DATABASE_PORT/DATABASE_USERNAME/DATABASE_PASSWORD/DATABASE_NAME), \
                 use DATABASE_URL instead, or unset DATABASE_HOST to run on the default in-memory SQLite database.
+                """
+        case .missingProductionDatabase:
+            return """
+                Running in the production environment without a database: neither DATABASE_URL nor \
+                DATABASE_HOST is set. The in-memory SQLite fallback is non-durable and is refused in \
+                production — set DATABASE_URL to a Postgres connection URL.
                 """
         case let .outboxTableMismatch(configured, required):
             return """

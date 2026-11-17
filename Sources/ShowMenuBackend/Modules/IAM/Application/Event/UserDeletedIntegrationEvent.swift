@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Consumed by `UserDeletedIntegrationEventHandler`, which removes the local
 /// `User` record. As with `UserCreatedIntegrationEvent`, it originates
-/// **in-process** in this template; a real deployment would receive it from the
+/// **in-process** in this app; a real deployment would receive it from the
 /// owning service over a message bus.
 struct UserDeletedIntegrationEvent: IntegrationEvent {
     static let kind: String = "users.deleted"

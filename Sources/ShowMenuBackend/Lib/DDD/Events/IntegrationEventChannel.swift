@@ -34,7 +34,7 @@ protocol IntegrationEventChannel: Sendable {
 
 /// In-process channel: publishing hands the event straight to the dispatcher,
 /// with no transport in between. The shipped default, and what makes the
-/// template's single-process deployment work; a real deployment swaps in a
+/// app's single-process deployment work; a real deployment swaps in a
 /// broker-backed channel (see `VaporQueueIntegrationEventChannel`).
 ///
 /// "InProcess", not "InMemory": this is about *where dispatch happens*, not

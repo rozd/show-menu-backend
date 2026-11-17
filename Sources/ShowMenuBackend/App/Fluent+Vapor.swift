@@ -33,7 +33,8 @@ extension DatabaseID {
 /// **Which SQL dialect** is the one thing here the environment does decide, and
 /// only because both are the same adapter: connection details present →
 /// Postgres; nothing set → an in-memory SQLite database, so `swift run Run` and
-/// `swift test` need no infrastructure at all. Everything above the `DataSource`
+/// `swift test` need no infrastructure at all. In the **production** environment
+/// nothing set is a startup error (``StoreConfigurationError/missingProductionDatabase``). Everything above the `DataSource`
 /// seam is identical either way, and hand-written SQL is expected to stay in the
 /// SQLite ∩ Postgres subset (see `Integration/Fluent/README.md`).
 ///
@@ -48,7 +49,7 @@ extension DatabaseID {
 /// | `DATABASE_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_NAME` | Postgres connection details, used when no URL is given |
 /// | `DATABASE_AUTO_MIGRATE` | `true` (default) runs pending migrations at boot; set `false` to run `swift run Run migrate` yourself |
 func configureFluentStore(_ app: Application) async throws {
-    let driver = try FluentDriver.resolve()
+    let driver = try FluentDriver.resolve(environment: app.environment)
     // Never the default database — see `DatabaseID.app` for why.
     app.databases.use(driver.configuration, as: .app, isDefault: false)
     registerMigrations(app)
@@ -93,25 +94,40 @@ enum FluentDriver: Sendable {
     /// A fresh, process-local SQLite database. The zero-configuration default.
     case sqliteInMemory
 
-    /// Postgres when connection details are present, SQLite otherwise.
-    static func resolve() throws -> FluentDriver {
-        if let url = Environment.get("DATABASE_URL"), !url.isEmpty {
+    /// Postgres when connection details are present, SQLite otherwise — except in
+    /// `.production`, where the missing configuration is a boot failure rather
+    /// than a silent fall back to a throwaway database.
+    ///
+    /// - Parameters:
+    ///   - values: The variable source; injectable for tests.
+    ///   - environment: The Vapor environment the app runs in.
+    static func resolve(
+        values: [String: String] = ProcessInfo.processInfo.environment,
+        environment: Vapor.Environment
+    ) throws -> FluentDriver {
+        func value(_ key: String) -> String? {
+            values[key].flatMap { $0.isEmpty ? nil : $0 }
+        }
+        if let url = value("DATABASE_URL") {
             return .postgres(try SQLPostgresConfiguration(url: url))
         }
-        guard let host = Environment.get("DATABASE_HOST"), !host.isEmpty else {
+        guard let host = value("DATABASE_HOST") else {
+            if environment == .production {
+                throw StoreConfigurationError.missingProductionDatabase
+            }
             return .sqliteInMemory
         }
         // Host given but no username: half-configured. Fail loudly at startup
         // rather than silently falling back to a throwaway database.
-        guard let username = Environment.get("DATABASE_USERNAME"), !username.isEmpty else {
+        guard let username = value("DATABASE_USERNAME") else {
             throw StoreConfigurationError.missingConnectionDetails
         }
         return .postgres(SQLPostgresConfiguration(
             hostname: host,
-            port: Environment.get("DATABASE_PORT").flatMap(Int.init) ?? SQLPostgresConfiguration.ianaPortNumber,
+            port: value("DATABASE_PORT").flatMap(Int.init) ?? SQLPostgresConfiguration.ianaPortNumber,
             username: username,
-            password: Environment.get("DATABASE_PASSWORD"),
-            database: Environment.get("DATABASE_NAME"),
+            password: values["DATABASE_PASSWORD"],
+            database: values["DATABASE_NAME"],
             tls: .prefer(try .init(configuration: .clientDefault))
         ))
     }
